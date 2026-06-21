@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/idempotency.dart';
 import '../../../../shared/widgets/app_alerts.dart';
 import '../../data/services/camera_intrinsics_service.dart';
 import '../../domain/entities/food_image_metadata.dart';
@@ -392,6 +393,9 @@ class _CameraScanPageState extends State<CameraScanPage>
     final buffer = await ui.ImmutableBuffer.fromFilePath(imagePath);
     final descriptor = await ui.ImageDescriptor.encoded(buffer);
     final fileName = imagePath.split(Platform.pathSeparator).last;
+    // One key per capture; reused if the BLoC retries this same capture so the
+    // backend dedupes them to a single inference job.
+    final idempotencyKey = generateIdempotencyKey();
     final cameraIntrinsics = intrinsics ??
         (useDeviceIntrinsics
             ? await _intrinsicsService.getBackCameraIntrinsics()
@@ -410,6 +414,7 @@ class _CameraScanPageState extends State<CameraScanPage>
         cx: cameraIntrinsics.cx * scaleX,
         cy: cameraIntrinsics.cy * scaleY,
         source: cameraIntrinsics.source,
+        idempotencyKey: idempotencyKey,
       );
     }
 
@@ -417,6 +422,7 @@ class _CameraScanPageState extends State<CameraScanPage>
       fileName: fileName,
       width: descriptor.width,
       height: descriptor.height,
+      idempotencyKey: idempotencyKey,
     );
   }
 }

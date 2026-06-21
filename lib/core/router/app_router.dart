@@ -6,6 +6,8 @@ import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/onboarding_page.dart';
 import '../../features/auth/presentation/pages/otp_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
+import '../../features/capture/presentation/pages/ar_capture_page.dart';
+import '../../features/capture/presentation/pages/capture_gate.dart';
 import '../../features/food_scan/presentation/pages/camera_scan_page.dart';
 import '../../features/food_scan/presentation/pages/scan_processing_page.dart';
 import '../../features/food_scan/presentation/pages/scan_result_page.dart';
@@ -47,8 +49,17 @@ class AppRouter {
         path: '/onboarding',
         builder: (context, state) => const OnboardingPage(),
       ),
+      // `/scan` is the capability gate; it forwards to the AR or plain capture
+      // screen. Existing `context.go('/scan')` calls keep working unchanged.
+      GoRoute(path: '/scan', builder: (context, state) => const CaptureGate()),
       GoRoute(
-          path: '/scan', builder: (context, state) => const CameraScanPage()),
+        path: '/scan/plain',
+        builder: (context, state) => const CameraScanPage(),
+      ),
+      GoRoute(
+        path: '/scan/ar',
+        builder: (context, state) => const ArCapturePage(),
+      ),
       GoRoute(
         path: '/scan-processing',
         builder: (context, state) => const ScanProcessingPage(),

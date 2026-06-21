@@ -1,6 +1,7 @@
 import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/image_url_utils.dart';
 import 'meal_component_entry.dart';
+import '../../../../core/utils/parsing.dart';
 
 class MealEntry {
   const MealEntry({
@@ -37,12 +38,6 @@ class MealEntry {
     final parsedComponents = rawComponents
         .map((item) => MealComponentEntry.fromJson(_asMap(item)))
         .toList();
-    final firstComponent = parsedComponents.isNotEmpty
-        ? {
-            'component_name': parsedComponents.first.componentName,
-            'physical_data_name': parsedComponents.first.physicalDataName,
-          }
-        : const <String, dynamic>{};
     final loggedAt = DateTimeUtils.parseToLocal(json['meal_time']) ??
         DateTimeUtils.parseToLocal(json['logged_at']) ??
         DateTimeUtils.parseToLocal(json['created_at']) ??
@@ -59,11 +54,11 @@ class MealEntry {
         searchQuery: json['search_query'],
       ),
       mealType: _mealTypeLabel(json['meal_type'] ?? json['meal_period']),
-      calories: _toDouble(json['total_calories']),
-      proteinGrams: _toDouble(json['total_protein']),
-      carbsGrams: _toDouble(json['total_carbs']),
-      fatGrams: _toDouble(json['total_fat']),
-      weightGrams: _toDouble(json['total_weight']),
+      calories: toDoubleOrZero(json['total_calories']),
+      proteinGrams: toDoubleOrZero(json['total_protein']),
+      carbsGrams: toDoubleOrZero(json['total_carbs']),
+      fatGrams: toDoubleOrZero(json['total_fat']),
+      weightGrams: toDoubleOrZero(json['total_weight']),
       loggedAt: loggedAt ?? DateTime.now().toLocal(),
       sourceType: sourceType,
       imageUrl: ImageUrlUtils.resolveAbsolute(
@@ -173,11 +168,6 @@ String _mealTypeLabel(Object? value) {
     return 'Ăn nhẹ';
   }
   return text;
-}
-
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
 }
 
 double? _toNullableDouble(Object? value) {

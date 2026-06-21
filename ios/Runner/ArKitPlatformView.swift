@@ -1,0 +1,231 @@
+import ARKit
+import Flutter
+import SceneKit
+import UIKit
+
+/// A Flutter platform view hosting a live ARKit session. Renders the camera feed
+/// via `ARSCNView`, raycasts from the screen centre each frame to measure the
+/// camera-to-food distance, and can capture a still frame with camera intrinsics.
+final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate {
+
+    private let sceneView = ARSCNView()
+    private weak var controller: ArController?
+    private var distanceWindow: [Double] = []
+
+    private let stabilityWindow = 8
+    private let stabilityStdCm = 1.0
+
+    // Set once at session start: ARKit only ever populates `sceneDepth` on
+    // LiDAR-equipped devices, so unlike Android's ARCore Depth API this
+    // maps to a specific, knowable sensor tier rather than "depth API
+    // supported, hardware unknown".
+    private let depthSource: String
+
+    init(frame: CGRect, controller: ArController) {
+        self.controller = controller
+        let lidarAvailable = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+        self.depthSource = lidarAvailable ? "lidar" : "none"
+        super.init()
+
+        sceneView.frame = frame
+        sceneView.session.delegate = self
+        sceneView.automaticallyUpdatesLighting = true
+
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.planeDetection = [.horizontal]
+        if lidarAvailable {
+            configuration.frameSemantics.insert(.sceneDepth)
+        }
+        sceneView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        controller.attach(self)
+    }
+
+    func view() -> UIView { sceneView }
+
+    func dispose() {
+        sceneView.session.pause()
+    }
+
+    // MARK: - ARSessionDelegate
+
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        guard let distance = centerDistanceCm(frame: frame) else {
+            distanceWindow.removeAll()
+            controller?.emitDistance(nil, stable: false, depthSource: depthSource)
+            return
+        }
+        distanceWindow.append(distance)
+        if distanceWindow.count > stabilityWindow {
+            distanceWindow.removeFirst(distanceWindow.count - stabilityWindow)
+        }
+        let mean = distanceWindow.reduce(0, +) / Double(distanceWindow.count)
+        let variance = distanceWindow.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(distanceWindow.count)
+        let stable = distanceWindow.count >= stabilityWindow && variance.squareRoot() < stabilityStdCm
+        controller?.emitDistance(mean, stable: stable, depthSource: depthSource)
+    }
+
+    // MARK: - Capture
+
+    func capture() -> [String: Any]? {
+        guard let frame = sceneView.session.currentFrame else { return nil }
+        guard let imagePath = saveCapturedImage(frame.capturedImage) else { return nil }
+
+        let intrinsics = frame.camera.intrinsics
+        let resolution = frame.camera.imageResolution
+        var payload: [String: Any] = [
+            "imagePath": imagePath,
+            "width": Int(resolution.width),
+            "height": Int(resolution.height),
+            "fx": Double(intrinsics.columns.0.x),
+            "fy": Double(intrinsics.columns.1.y),
+            "cx": Double(intrinsics.columns.2.x),
+            "cy": Double(intrinsics.columns.2.y),
+        ]
+        if let distance = centerDistanceCm(frame: frame) {
+            payload["distanceCm"] = distance
+        }
+        // Tier 1 (LiDAR/ToF iPhones): a dense per-pixel depth map is
+        // available straight from the sensor — far more accurate than the
+        // single-point raycast distance, so use it directly. Tier 3
+        // (no LiDAR) devices never populate `sceneDepth`; they fall back to
+        // `distanceCm`-only anchoring, which is the existing behaviour above.
+        if let sceneDepth = frame.sceneDepth,
+           let depthPath = saveDepthAsNpyCm(depthMap: sceneDepth.depthMap, confidenceMap: sceneDepth.confidenceMap) {
+            payload["depthMapPath"] = depthPath
+            payload["depthUnit"] = "cm"
+        }
+        return payload
+    }
+
+    /// Reads ARKit's metric depth map (metres) — confidence-filtered against
+    /// `confidenceMap` (low-confidence pixels are zeroed, the same invalid
+    /// sentinel the rest of this pipeline already uses) — converts to
+    /// centimetres and writes it as a .npy float32 array for the AI server's
+    /// `load_client_depth_map`.
+    private func saveDepthAsNpyCm(depthMap: CVPixelBuffer, confidenceMap: CVPixelBuffer?) -> String? {
+        CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
+
+        let width = CVPixelBufferGetWidth(depthMap)
+        let height = CVPixelBufferGetHeight(depthMap)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(depthMap)
+        guard let base = CVPixelBufferGetBaseAddress(depthMap) else { return nil }
+
+        var confidenceBase: UnsafeMutableRawPointer?
+        var confidenceStride = 0
+        if let confidenceMap = confidenceMap,
+           CVPixelBufferGetWidth(confidenceMap) == width,
+           CVPixelBufferGetHeight(confidenceMap) == height {
+            CVPixelBufferLockBaseAddress(confidenceMap, .readOnly)
+            confidenceBase = CVPixelBufferGetBaseAddress(confidenceMap)
+            confidenceStride = CVPixelBufferGetBytesPerRow(confidenceMap)
+        }
+        defer {
+            if let confidenceMap = confidenceMap, confidenceBase != nil {
+                CVPixelBufferUnlockBaseAddress(confidenceMap, .readOnly)
+            }
+        }
+
+        var values = [Float](repeating: 0, count: width * height)
+        for row in 0..<height {
+            let rowPtr = base.advanced(by: row * bytesPerRow).assumingMemoryBound(to: Float32.self)
+            let confidenceRowPtr = confidenceBase?.advanced(by: row * confidenceStride).assumingMemoryBound(to: UInt8.self)
+            for col in 0..<width {
+                let meters = rowPtr[col]
+                var cm: Float = meters.isFinite ? meters * 100.0 : 0
+                // ARConfidenceLevel: 0 = low, 1 = medium, 2 = high. Drop low-
+                // confidence pixels rather than feed noisy geometry forward.
+                if let confidenceRowPtr = confidenceRowPtr, confidenceRowPtr[col] < 1 {
+                    cm = 0
+                }
+                values[row * width + col] = cm
+            }
+        }
+
+        return writeNpyFloat32(values, rows: height, cols: width)
+    }
+
+    /// Minimal NPY v1.0 writer (float32, C-order) — avoids the bit-depth /
+    /// codec ambiguity an image format would introduce for raw depth.
+    private func writeNpyFloat32(_ values: [Float], rows: Int, cols: Int) -> String? {
+        let headerDict = "{'descr': '<f4', 'fortran_order': False, 'shape': (\(rows), \(cols)), }"
+        let preHeaderLen = 6 + 2 + 2
+        let totalLen = preHeaderLen + headerDict.count + 1
+        let pad = (64 - (totalLen % 64)) % 64
+        let header = headerDict + String(repeating: " ", count: pad) + "\n"
+        guard let headerBytes = header.data(using: .ascii) else { return nil }
+
+        var data = Data([0x93, 0x4E, 0x55, 0x4D, 0x50, 0x59]) // \x93NUMPY
+        data.append(1) // major version
+        data.append(0) // minor version
+        var headerLen = UInt16(headerBytes.count).littleEndian
+        withUnsafeBytes(of: &headerLen) { data.append(contentsOf: $0) }
+        data.append(headerBytes)
+        for v in values {
+            var le = v.bitPattern.littleEndian
+            withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
+        }
+
+        let fileName = "ar_depth_\(UUID().uuidString).npy"
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(fileName)
+        do {
+            try data.write(to: url, options: .atomic)
+            return url.path
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - Internals
+
+    private func centerDistanceCm(frame: ARFrame) -> Double? {
+        let center = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+        guard sceneView.bounds.width > 0,
+              let query = sceneView.raycastQuery(from: center, allowing: .estimatedPlane, alignment: .horizontal)
+        else { return nil }
+        guard let result = sceneView.session.raycast(query).first else { return nil }
+
+        let camera = frame.camera.transform.columns.3
+        let hit = result.worldTransform.columns.3
+        let dx = camera.x - hit.x
+        let dy = camera.y - hit.y
+        let dz = camera.z - hit.z
+        let meters = (dx * dx + dy * dy + dz * dz).squareRoot()
+        return Double(meters) * 100.0
+    }
+
+    private func saveCapturedImage(_ pixelBuffer: CVPixelBuffer) -> String? {
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        let uiImage = UIImage(cgImage: cgImage)
+        guard let data = uiImage.jpegData(compressionQuality: 0.95) else { return nil }
+        let fileName = "ar_capture_\(UUID().uuidString).jpg"
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(fileName)
+        do {
+            try data.write(to: url, options: .atomic)
+            return url.path
+        } catch {
+            return nil
+        }
+    }
+}
+
+/// Factory that produces `ArKitPlatformView` instances for the
+/// `nutrilens/ar/preview` view type.
+final class ArKitViewFactory: NSObject, FlutterPlatformViewFactory {
+    private let controller: ArController
+
+    init(controller: ArController) {
+        self.controller = controller
+        super.init()
+    }
+
+    func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
+        ArKitPlatformView(frame: frame, controller: controller)
+    }
+
+    func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+        FlutterStandardMessageCodec.sharedInstance()
+    }
+}

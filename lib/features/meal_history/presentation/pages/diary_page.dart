@@ -14,6 +14,7 @@ import '../../../nutrition/presentation/bloc/nutrition_state.dart';
 import '../../data/models/meal_entry.dart';
 import '../bloc/meal_history_cubit.dart';
 import '../bloc/meal_history_state.dart';
+import '../../../../core/utils/parsing.dart';
 
 enum _DiaryPhase { loading, success, error }
 
@@ -89,14 +90,14 @@ class _DiaryPageState extends State<DiaryPage> {
           await AppDependencies.dioClient.get<Map<String, dynamic>>(
         ApiEndpoints.nutritionTrends,
         queryParameters: {
-          'from': _dateValue(start),
-          'to': _dateValue(end),
+          'from': DateTimeUtils.formatDateKey(start),
+          'to': DateTimeUtils.formatDateKey(end),
         },
       );
       final byDate = _trendCaloriesByDate(response.data?['data']);
       final points = dates
           .map((date) =>
-              _CaloriePoint(date: date, calories: byDate[_dateValue(date)] ?? 0))
+              _CaloriePoint(date: date, calories: byDate[DateTimeUtils.formatDateKey(date)] ?? 0))
           .toList();
       if (!mounted) return;
       setState(() {
@@ -166,7 +167,7 @@ class _DiaryPageState extends State<DiaryPage> {
       final map = Map<String, dynamic>.from(record);
       final dateText = _trendDate(map);
       if (dateText == null) continue;
-      byDate[dateText] = _toDouble(
+      byDate[dateText] = toDoubleOrZero(
         map['total_calories'] ??
             map['calories'] ??
             map['intake_calories'] ??
@@ -205,13 +206,7 @@ class _DiaryPageState extends State<DiaryPage> {
     if (raw == null) return null;
     final parsed = DateTime.tryParse('$raw');
     if (parsed == null) return '$raw'.split('T').first;
-    return _dateValue(parsed);
-  }
-
-  String _dateValue(DateTime date) {
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-    return '${date.year}-$month-$day';
+    return DateTimeUtils.formatDateKey(parsed);
   }
 
   @override
@@ -972,11 +967,6 @@ class _CaloriePoint {
 
   final DateTime date;
   final double calories;
-}
-
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
 }
 
 class _MealSection extends StatelessWidget {

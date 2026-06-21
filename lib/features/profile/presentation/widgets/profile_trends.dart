@@ -6,6 +6,8 @@ import '../../../../core/di/app_dependencies.dart';
 import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/premium_widgets.dart';
+import '../../../../core/utils/parsing.dart';
+import '../../../../core/utils/date_time_utils.dart';
 
 /// Profile analytics: real weight-history and nutrition-trend charts backed by
 ///   GET /accounts/profile/weight-history/
@@ -49,7 +51,7 @@ class _ProfileTrendsState extends State<ProfileTrends> {
     }
     final today = DateTime.now();
     final from = today.subtract(const Duration(days: _rangeDays - 1));
-    final params = {'from': _dateValue(from), 'to': _dateValue(today)};
+    final params = {'from': DateTimeUtils.formatDateKey(from), 'to': DateTimeUtils.formatDateKey(today)};
 
     var weights = const <_WeightPoint>[];
     var trends = const <_TrendPoint>[];
@@ -128,12 +130,6 @@ class _ProfileTrendsState extends State<ProfileTrends> {
     }
     debugPrintStack(stackTrace: stackTrace, maxFrames: 4);
     return detail;
-  }
-
-  String _dateValue(DateTime date) {
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-    return '${date.year}-$month-$day';
   }
 
   @override
@@ -560,7 +556,7 @@ class _WeightPoint {
     for (final item in list) {
       if (item is! Map) continue;
       final map = Map<String, dynamic>.from(item);
-      final weight = _toDouble(map['weight']);
+      final weight = toDoubleOrZero(map['weight']);
       if (weight <= 0) continue;
       points.add(
         _WeightPoint(
@@ -595,10 +591,10 @@ class _TrendPoint {
       points.add(
         _TrendPoint(
           date: DateTime.tryParse('${map['date']}') ?? DateTime.now(),
-          calories: _toDouble(map['calories'] ?? map['total_calories']),
-          protein: _toDouble(map['protein'] ?? map['total_protein']),
-          carbs: _toDouble(map['carbs'] ?? map['total_carbs']),
-          fat: _toDouble(map['fat'] ?? map['total_fat']),
+          calories: toDoubleOrZero(map['calories'] ?? map['total_calories']),
+          protein: toDoubleOrZero(map['protein'] ?? map['total_protein']),
+          carbs: toDoubleOrZero(map['carbs'] ?? map['total_carbs']),
+          fat: toDoubleOrZero(map['fat'] ?? map['total_fat']),
         ),
       );
     }
@@ -613,7 +609,3 @@ class _TrendPoint {
   final double fat;
 }
 
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
-}

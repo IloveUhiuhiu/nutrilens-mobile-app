@@ -64,7 +64,10 @@ class FoodScanBloc extends Bloc<FoodScanEvent, FoodScanState> {
       ));
     } catch (error) {
       if (_cancelRequested) return;
-      emit(FoodScanError('Không thể tải ảnh lên máy chủ AI: $error'));
+      debugPrint('[FoodScanBloc] unexpected upload error: $error');
+      emit(const FoodScanError(
+        'Không thể tải ảnh lên máy chủ AI. Vui lòng thử lại.',
+      ));
     }
   }
 

@@ -5,6 +5,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var nativePhotoCapture: NativePhotoCapture?
+  private var arController: ArController?
 
   override func application(
     _ application: UIApplication,
@@ -15,6 +16,18 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+
+    // AR (ARKit): capability + realtime distance + capture, plus the native
+    // camera preview platform view.
+    if let arRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "ArKit") {
+      let arController = ArController(messenger: arRegistrar.messenger())
+      arRegistrar.register(
+        ArKitViewFactory(controller: arController),
+        withId: "nutrilens/ar/preview"
+      )
+      self.arController = arController
+    }
+
     guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "CameraIntrinsics") else {
       return
     }

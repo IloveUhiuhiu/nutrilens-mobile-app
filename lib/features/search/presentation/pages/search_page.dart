@@ -100,12 +100,12 @@ class _SearchPageState extends State<SearchPage> {
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'Tra cứ Hệ Thống Dinh Dưỡng',
+            'Tra cứu Hệ Thống Dinh Dưỡng',
             style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 4),
           const Text(
-            'Tìm món ăn từ Hệ thông dinh dưỡng USDA FoodData Central và lưu khẩu phần theo gram.',
+            'Tìm món ăn từ Hệ thống dinh dưỡng USDA FoodData Central và lưu khẩu phần theo gram.',
             style: TextStyle(
               color: AppTheme.textSecondary,
               fontWeight: FontWeight.w600,
@@ -203,7 +203,7 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Nhập từ khóa ở ô tìm kiếm phía trên để lấy danh sách thực phẩm từ Hệ thông dinh dưỡng USDA FoodData Central.',
+                    'Nhập từ khóa ở ô tìm kiếm phía trên để lấy danh sách thực phẩm từ Hệ thống dinh dưỡng USDA FoodData Central.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppTheme.textSecondary),
                   ),

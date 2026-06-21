@@ -14,6 +14,7 @@ import '../../../../shared/widgets/premium_widgets.dart';
 import '../../../../shared/widgets/search_skeleton_loader.dart';
 import '../../../meal_history/presentation/bloc/meal_history_cubit.dart';
 import '../../../nutrition/presentation/bloc/nutrition_cubit.dart';
+import '../../../../core/utils/date_time_utils.dart';
 
 class BarcodeScanPage extends StatefulWidget {
   const BarcodeScanPage({super.key});
@@ -205,7 +206,7 @@ class _BarcodeScanPageState extends State<BarcodeScanPage> {
         data: {
           'barcode': product.barcode,
           'servings': _servings,
-          'date': _dateValue(targetDate),
+          'date': DateTimeUtils.formatDateKey(targetDate),
           'source_type': 'barcode',
         },
       );
@@ -858,12 +859,6 @@ bool _isValidRetailBarcode(String? value) {
       value.length == 12 ||
       value.length == 13 ||
       value.length == 14;
-}
-
-String _dateValue(DateTime date) {
-  final month = date.month.toString().padLeft(2, '0');
-  final day = date.day.toString().padLeft(2, '0');
-  return '${date.year}-$month-$day';
 }
 
 String _servingLabel(double value) {

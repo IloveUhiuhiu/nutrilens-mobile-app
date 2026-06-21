@@ -4,6 +4,8 @@ import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
+import com.example.nutrilens_mobile_app.ar.ArController
+import com.example.nutrilens_mobile_app.ar.ArViewFactory
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -21,6 +23,14 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // AR (ARCore): capability + realtime distance + frame capture, and the
+        // native camera preview platform view.
+        val arController = ArController(this, flutterEngine.dartExecutor.binaryMessenger)
+        flutterEngine
+            .platformViewsController
+            .registry
+            .registerViewFactory("nutrilens/ar/preview", ArViewFactory(arController))
     }
 
     private fun getBackCameraIntrinsics(result: MethodChannel.Result) {

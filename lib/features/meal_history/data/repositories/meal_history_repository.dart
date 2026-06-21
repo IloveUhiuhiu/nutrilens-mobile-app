@@ -1,6 +1,7 @@
 import '../../../../core/config/api_endpoints.dart';
 import '../../../../core/network/dio_client.dart';
 import '../models/meal_entry.dart';
+import '../../../../core/utils/date_time_utils.dart';
 
 class MealHistoryRepository {
   MealHistoryRepository(this._client);
@@ -10,7 +11,7 @@ class MealHistoryRepository {
   Future<List<MealEntry>> fetchDailyMeals({DateTime? date}) async {
     final response = await _client.get<Map<String, dynamic>>(
       ApiEndpoints.mealList,
-      queryParameters: date == null ? null : {'date': _dateValue(date)},
+      queryParameters: date == null ? null : {'date': DateTimeUtils.formatDateKey(date)},
     );
     final data = response.data?['data'];
     final meals = _extractMeals(data ?? response.data);
@@ -47,12 +48,6 @@ class MealHistoryRepository {
       }
     }
     return const [];
-  }
-
-  String _dateValue(DateTime date) {
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-    return '${date.year}-$month-$day';
   }
 
   bool _isSameDate(DateTime left, DateTime right) {
