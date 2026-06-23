@@ -13,7 +13,6 @@ class AppTheme {
   static const Color carb = accent;
   static const Color fat = mint;
   static const Color background = Color(0xFFF4F7F5);
-  static const Color darkBackground = Color(0xFF121212);
   static const Color primaryContainer = Color(0xFFD8F3DC);
   static const Color surfaceContainer = Color(0xFFE9F5EE);
   static const Color inputBorder = Color(0xFFE9ECEF);

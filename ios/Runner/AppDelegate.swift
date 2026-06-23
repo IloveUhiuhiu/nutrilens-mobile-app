@@ -5,7 +5,9 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var nativePhotoCapture: NativePhotoCapture?
-  private var arController: ArController?
+  // Not private: SceneDelegate forwards scene pause/resume events here so the
+  // ARKit session stops holding the camera while the app is backgrounded.
+  var arController: ArController?
 
   override func application(
     _ application: UIApplication,

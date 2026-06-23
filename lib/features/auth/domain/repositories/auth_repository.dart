@@ -28,4 +28,9 @@ abstract class AuthRepository {
   });
 
   Future<void> logout();
+
+  /// Resolves a saved session on app startup without forcing a fresh login.
+  /// Returns `true` if there's a usable access token (existing one, or a
+  /// freshly refreshed one), `false` if the user needs to log in again.
+  Future<bool> tryRestoreSession();
 }

@@ -15,9 +15,15 @@ class ArViewFactory(
 ) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
 
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
-        val view = ArPlatformView(context) { distanceCm, stable, depthSource ->
-            controller.emitDistance(distanceCm, stable, depthSource)
-        }
+        val view = ArPlatformView(
+            context,
+            onDistance = { distanceCm, stable, depthSource ->
+                controller.emitDistance(distanceCm, stable, depthSource)
+            },
+            onSessionError = { message ->
+                controller.emitSessionError(message)
+            },
+        )
         controller.attachView(view)
         return view
     }

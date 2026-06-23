@@ -35,6 +35,18 @@ class _ArCapturePageState extends State<ArCapturePage> {
   double? _distanceCm;
   bool _stable = false;
   bool _capturing = false;
+  // Set when the native AR session itself fails (see ArController.emitSessionError /
+  // ArKitPlatformView.session(_:didFailWithError:)) — distinct from "still
+  // searching for a surface", which is the same on-screen state the user
+  // would otherwise see forever with no way to tell the two apart.
+  String? _sessionError;
+  // True once the user has spent too long without a stable reading (e.g. a
+  // glass table, poor lighting, or just a slow surface) — surfaces a
+  // non-judgemental escape hatch instead of leaving them stuck staring at
+  // "move your phone" forever.
+  bool _showFallbackSuggestion = false;
+  Timer? _fallbackTimer;
+  static const _fallbackSuggestionDelay = Duration(seconds: 8);
   // "lidar" | "ar_depth" | "none" — see ArKitPlatformView.swift /
   // ArPlatformView.kt. Purely informational; the actual depth-map upload
   // decision is driven by `depthMapPath` being non-null at capture time.
@@ -49,21 +61,34 @@ class _ArCapturePageState extends State<ArCapturePage> {
         if (mounted) setState(() => _distanceCm = null);
       },
     );
+    _fallbackTimer = Timer(_fallbackSuggestionDelay, () {
+      if (mounted && !_stable && _sessionError == null) {
+        setState(() => _showFallbackSuggestion = true);
+      }
+    });
   }
 
   @override
   void dispose() {
     _distanceSub?.cancel();
+    _fallbackTimer?.cancel();
     _command.invokeMethod('dispose');
     super.dispose();
   }
 
   void _onDistanceEvent(dynamic event) {
     if (event is! Map || !mounted) return;
+    final error = event['error'] as String?;
+    if (error != null) {
+      debugPrint('[ArCapturePage] AR session error: $error');
+      setState(() => _sessionError = error);
+      return;
+    }
     setState(() {
       _distanceCm = (event['distance'] as num?)?.toDouble();
       _stable = event['stable'] == true;
       _depthSource = event['depthSource'] as String? ?? 'none';
+      if (_stable) _showFallbackSuggestion = false;
     });
   }
 
@@ -116,11 +141,23 @@ class _ArCapturePageState extends State<ArCapturePage> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Stack(
+        child: _sessionError != null
+            ? _SessionErrorView(
+                onRetry: () => context.pushReplacement('/scan/ar'),
+                onFallback: () => context.pushReplacement('/scan/plain'),
+              )
+            : Stack(
           alignment: Alignment.center,
           children: [
             Positioned.fill(child: _preview()),
-            _Reticle(active: _stable),
+            // _Reticle must be a positioned child — Scaffold.body gives this
+            // Stack loose constraints, and a Stack with an unpositioned
+            // fixed-size child sizes itself to fit that child instead of
+            // filling the screen. Without this wrapper the whole screen
+            // (preview, close button, badge, shutter) collapsed into a tiny
+            // box anchored top-left, matching exactly what was reported on
+            // ARCore/ARKit-capable devices.
+            Positioned.fill(child: Center(child: _Reticle(active: _stable))),
             if (_distanceCm != null)
               Positioned(
                 top: MediaQuery.of(context).size.height * 0.30,
@@ -144,17 +181,33 @@ class _ArCapturePageState extends State<ArCapturePage> {
               bottom: 120,
               left: 24,
               right: 24,
-              child: Text(
-                _distanceCm == null
-                    ? 'Rê máy chậm trên đĩa ăn để dò mặt phẳng'
-                    : _stable
-                        ? 'Giữ yên — chạm để chụp'
-                        : 'Đang ổn định khoảng cách…',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _distanceCm == null
+                        ? 'Rê máy chậm trên đĩa ăn để dò mặt phẳng'
+                        : _stable
+                            ? 'Giữ yên — chạm để chụp'
+                            : 'Đang ổn định khoảng cách…',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (_showFallbackSuggestion && !_stable) ...[
+                    const SizedBox(height: 10),
+                    TextButton.icon(
+                      onPressed: () => context.pushReplacement('/scan/plain'),
+                      icon: const Icon(Icons.camera_alt_outlined, color: Colors.white70, size: 18),
+                      label: const Text(
+                        'Không sao, bạn vẫn có thể quét bằng ảnh',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             Positioned(
@@ -303,6 +356,65 @@ class _DistancePill extends StatelessWidget {
             fontSize: 20,
             fontWeight: FontWeight.w900,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown when the native AR session itself failed to start — distinct from
+/// the normal "still searching for a surface" state, which looked
+/// identical on screen before this existed (see `_sessionError`).
+class _SessionErrorView extends StatelessWidget {
+  const _SessionErrorView({required this.onRetry, required this.onFallback});
+
+  final VoidCallback onRetry;
+  final VoidCallback onFallback;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.videocam_off_outlined, color: Colors.white70, size: 48),
+            const SizedBox(height: 16),
+            const Text(
+              'Không thể khởi động chế độ đo AR',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Không sao, bạn vẫn có thể quét món ăn bằng ảnh.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: onFallback,
+              icon: const Icon(Icons.camera_alt_outlined),
+              label: const Text('Chụp ảnh thay thế'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.accent,
+                foregroundColor: const Color(0xFF2B1B00),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: onRetry,
+              child: const Text(
+                'Thử lại',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+          ],
         ),
       ),
     );

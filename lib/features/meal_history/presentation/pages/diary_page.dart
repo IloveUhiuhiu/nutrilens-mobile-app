@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,7 @@ import '../../../../core/di/app_dependencies.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/date_time_utils.dart';
 import '../../../../shared/widgets/app_chrome.dart';
+import '../../../../shared/widgets/nutrient_badges.dart';
 import '../../../../shared/widgets/premium_widgets.dart';
 import '../../../nutrition/presentation/bloc/nutrition_cubit.dart';
 import '../../../nutrition/presentation/bloc/nutrition_state.dart';
@@ -840,125 +842,129 @@ class _CalorieBarChart extends StatelessWidget {
         calorieGoal,
         ...points.map((point) => point.calories),
         1.0,
-      ].reduce((a, b) => a > b ? a : b);
+      ].reduce((a, b) => a > b ? a : b) * 1.15;
+
+  Color _barColor(double calories, double goal, bool selected) {
+    final base = goal <= 0
+        ? AppTheme.mint
+        : calories / goal > 1.08
+            ? AppTheme.danger
+            : calories / goal > 0.92
+                ? AppTheme.accent
+                : AppTheme.mint;
+    return selected ? base : base.withValues(alpha: 0.7);
+  }
 
   @override
   Widget build(BuildContext context) {
     // Compact (day-of-month) labels once the range is too dense for weekday
     // labels; otherwise show the weekday abbreviation.
     final compact = points.length > 9;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final available = constraints.maxWidth;
-        final slot = available / points.length;
-        if (slot >= _minSlot) {
-          // Everything fits: stretch bars to fill the available width.
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: List.generate(
-              points.length,
-              (index) => Expanded(child: _bar(index, compact)),
-            ),
-          );
-        }
-        // Too many days to fit: scroll horizontally with a fixed slot width.
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: _minSlot * points.length,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(
-                points.length,
-                (index) => SizedBox(width: _minSlot, child: _bar(index, compact)),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
+    final chartWidth = points.length * _minSlot;
 
-  Widget _bar(int index, bool compact) {
-    final point = points[index];
-    final ratio = (point.calories / _maxCalories).clamp(0.04, 1.0);
-    final selected = activeIndex == index;
-    return PressableScale(
-      onTap: () => onSelected(index),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 3),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            if (selected)
-              Text(
-                point.calories.toStringAsFixed(0),
-                maxLines: 1,
-                style: const TextStyle(
-                  color: AppTheme.primary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                ),
-              )
-            else
-              const SizedBox(height: 14),
-            const SizedBox(height: 4),
-            Expanded(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: ratio),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, value, _) {
-                    return FractionallySizedBox(
-                      heightFactor: value,
-                      alignment: Alignment.bottomCenter,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: _barColor(point.calories, calorieGoal),
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(8),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _barColor(point.calories, calorieGoal)
-                                  .withValues(alpha: 0.24),
-                              blurRadius: selected ? 14 : 8,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: const SizedBox(width: double.infinity),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              compact ? '${point.date.day}' : DateFormat.E().format(point.date),
-              maxLines: 1,
-              overflow: TextOverflow.clip,
-              style: TextStyle(
-                color: selected ? AppTheme.primary : AppTheme.textSecondary,
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-              ),
+    final chart = BarChart(
+      BarChartData(
+        maxY: _maxCalories,
+        alignment: BarChartAlignment.spaceAround,
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        extraLinesData: ExtraLinesData(
+          horizontalLines: [
+            HorizontalLine(
+              y: calorieGoal,
+              color: AppTheme.fat,
+              strokeWidth: 1.5,
+              dashArray: [6, 4],
             ),
           ],
         ),
+        titlesData: FlTitlesData(
+          leftTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                final index = value.toInt();
+                if (index < 0 || index >= points.length) {
+                  return const SizedBox.shrink();
+                }
+                final point = points[index];
+                final selected = activeIndex == index;
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    compact
+                        ? '${point.date.day}'
+                        : DateFormat.E().format(point.date),
+                    style: TextStyle(
+                      color: selected
+                          ? AppTheme.primary
+                          : AppTheme.textSecondary,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        barTouchData: BarTouchData(
+          touchTooltipData: BarTouchTooltipData(
+            getTooltipColor: (_) => AppTheme.textPrimary,
+            getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem(
+              '${rod.toY.toStringAsFixed(0)} kcal',
+              const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          touchCallback: (event, response) {
+            if (!event.isInterestedForInteractions) return;
+            final index = response?.spot?.touchedBarGroupIndex;
+            if (index != null && index >= 0 && index < points.length) {
+              onSelected(index);
+            }
+          },
+        ),
+        barGroups: List.generate(points.length, (index) {
+          final point = points[index];
+          final selected = activeIndex == index;
+          return BarChartGroupData(
+            x: index,
+            barRods: [
+              BarChartRodData(
+                toY: point.calories,
+                width: 18,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(8),
+                ),
+                color: _barColor(point.calories, calorieGoal, selected),
+              ),
+            ],
+          );
+        }),
       ),
+      duration: const Duration(milliseconds: 350),
     );
-  }
 
-  Color _barColor(double calories, double goal) {
-    if (goal <= 0) return AppTheme.mint;
-    final ratio = calories / goal;
-    if (ratio > 1.08) return AppTheme.danger;
-    if (ratio > 0.92) return AppTheme.accent;
-    return AppTheme.mint;
+    if (points.length <= 9) return chart;
+    // Too many days to fit comfortably: scroll horizontally with a fixed
+    // slot width instead of squeezing every bar into the available space.
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(width: chartWidth, child: chart),
+    );
   }
 }
 
@@ -1015,6 +1021,12 @@ class _MealSection extends StatelessWidget {
                       const SizedBox(height: 6),
                       Row(
                         children: [
+                          const Icon(
+                            Icons.schedule_outlined,
+                            size: 14,
+                            color: AppTheme.textSecondary,
+                          ),
+                          const SizedBox(width: 4),
                           Text(
                             DateTimeUtils.formatTime(entry.loggedAt),
                             style: const TextStyle(
@@ -1027,18 +1039,21 @@ class _MealSection extends StatelessWidget {
                             label: 'P',
                             value: entry.proteinGrams,
                             color: AppTheme.protein,
+                            icon: nutrientIcon('protein'),
                           ),
                           const SizedBox(width: 4),
                           _NutrientBadge(
                             label: 'C',
                             value: entry.carbsGrams,
                             color: AppTheme.accent,
+                            icon: nutrientIcon('carb'),
                           ),
                           const SizedBox(width: 4),
                           _NutrientBadge(
                             label: 'F',
                             value: entry.fatGrams,
                             color: AppTheme.mint,
+                            icon: nutrientIcon('fat'),
                           ),
                         ],
                       ),
@@ -1078,11 +1093,13 @@ class _NutrientBadge extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    required this.icon,
   });
 
   final String label;
   final double value;
   final Color color;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -1100,13 +1117,20 @@ class _NutrientBadge extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-        child: Text(
-          '$label ${value.toStringAsFixed(0)}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 11,
-            fontWeight: FontWeight.w900,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 11, color: Colors.white),
+            const SizedBox(width: 3),
+            Text(
+              '$label ${value.toStringAsFixed(0)}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
         ),
       ),
     );

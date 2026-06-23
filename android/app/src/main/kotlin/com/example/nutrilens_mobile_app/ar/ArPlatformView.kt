@@ -34,6 +34,7 @@ import kotlin.math.sqrt
 class ArPlatformView(
     private val context: Context,
     private val onDistance: (distanceCm: Double?, stable: Boolean, depthSource: String) -> Unit,
+    private val onSessionError: (message: String) -> Unit,
 ) : PlatformView, GLSurfaceView.Renderer {
 
     private val glView = GLSurfaceView(context).apply {
@@ -72,6 +73,30 @@ class ArPlatformView(
         } catch (_: Exception) {
         }
         session = null
+    }
+
+    /**
+     * Called when the host Activity is paused (e.g. app backgrounded mid-scan).
+     * Order matters — GLSurfaceView is paused first so it doesn't query the
+     * session after it's gone; pausing the session first risks the GL thread
+     * hitting a SessionPausedException on its next frame. Mirrors ARCore's
+     * own HelloAR sample.
+     */
+    fun pauseSession() {
+        glView.onPause()
+        try {
+            session?.pause()
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Called when the host Activity resumes. Mirror of [pauseSession]'s ordering. */
+    fun resumeSession() {
+        try {
+            session?.resume()
+        } catch (_: Exception) {
+        }
+        glView.onResume()
     }
 
     // --- GLSurfaceView.Renderer ------------------------------------------------
@@ -160,7 +185,8 @@ class ArPlatformView(
             newSession.resume()
             session = newSession
         } catch (e: Exception) {
-            mainHandler.post { onDistance(null, false, depthSource()) }
+            val message = e.message ?: "Không thể khởi tạo phiên AR."
+            mainHandler.post { onSessionError(message) }
         }
     }
 

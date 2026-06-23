@@ -25,12 +25,34 @@ final class ArController: NSObject, FlutterStreamHandler {
         self.view = view
     }
 
+    /// No-ops if no AR view is currently active — safe to call unconditionally
+    /// from scene lifecycle callbacks regardless of which screen is showing.
+    func pauseActiveSession() {
+        view?.pauseSession()
+    }
+
+    func resumeActiveSession() {
+        view?.resumeSession()
+    }
+
     func emitDistance(_ distanceCm: Double?, stable: Bool, depthSource: String) {
         guard let sink = eventSink else { return }
         var payload: [String: Any] = ["stable": stable, "depthSource": depthSource]
         if let distanceCm = distanceCm {
             payload["distance"] = distanceCm
         }
+        DispatchQueue.main.async { sink(payload) }
+    }
+
+    /// Reports that the ARKit session itself failed (`ARSessionDelegate.session(_:didFailWithError:)`),
+    /// e.g. camera permission revoked at the OS level despite the Dart-side
+    /// pre-check. Without this, a session failure was previously dropped
+    /// entirely — the UI kept showing "still searching for a surface" with
+    /// no way to tell the user was stuck for a reason that camera-shake
+    /// would never fix.
+    func emitSessionError(_ message: String) {
+        guard let sink = eventSink else { return }
+        let payload: [String: Any] = ["stable": false, "depthSource": "none", "error": message]
         DispatchQueue.main.async { sink(payload) }
     }
 

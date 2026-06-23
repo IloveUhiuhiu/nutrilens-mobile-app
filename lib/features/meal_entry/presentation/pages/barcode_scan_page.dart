@@ -11,6 +11,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_alerts.dart';
 import '../../../../shared/widgets/app_chrome.dart';
 import '../../../../shared/widgets/premium_widgets.dart';
+import '../../../../shared/widgets/quantity_input_sheet.dart';
 import '../../../../shared/widgets/search_skeleton_loader.dart';
 import '../../../meal_history/presentation/bloc/meal_history_cubit.dart';
 import '../../../nutrition/presentation/bloc/nutrition_cubit.dart';
@@ -286,23 +287,23 @@ class _BarcodeScanPageState extends State<BarcodeScanPage> {
                           children: [
                             _MacroSummary(
                               label: 'Kcal',
-                              value: product.calories,
+                              value: product.calories * _servings,
                               color: AppTheme.primary,
                               suffix: '',
                             ),
                             _MacroSummary(
                               label: 'Đạm',
-                              value: product.protein,
+                              value: product.protein * _servings,
                               color: AppTheme.protein,
                             ),
                             _MacroSummary(
                               label: 'Carb',
-                              value: product.carbs,
+                              value: product.carbs * _servings,
                               color: AppTheme.carb,
                             ),
                             _MacroSummary(
                               label: 'Béo',
-                              value: product.fat,
+                              value: product.fat * _servings,
                               color: AppTheme.fat,
                             ),
                           ],
@@ -328,56 +329,38 @@ class _BarcodeScanPageState extends State<BarcodeScanPage> {
                               ],
                             ),
                             const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                IconButton.outlined(
-                                  onPressed: _servings <= 0.25
-                                      ? null
-                                      : () {
-                                          final next = (_servings - 0.25)
-                                              .clamp(0.25, 99)
-                                              .toDouble();
-                                          setState(() => _servings = next);
-                                          _servingsController.text =
-                                              _servingLabel(_servings);
-                                          setSheetState(() {});
-                                        },
-                                  icon: const Icon(Icons.remove),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: TextField(
-                                    controller: _servingsController,
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Số thực',
-                                      hintText: '1.5',
-                                    ),
-                                    onChanged: (value) {
-                                      final parsed = double.tryParse(
-                                        value.replaceAll(',', '.'),
-                                      );
-                                      if (parsed == null || parsed <= 0) return;
-                                      setState(() => _servings = parsed);
-                                      setSheetState(() {});
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                IconButton.filled(
-                                  onPressed: () {
-                                    setState(() => _servings += 0.25);
-                                    _servingsController.text =
-                                        _servingLabel(_servings);
-                                    setSheetState(() {});
-                                  },
-                                  icon: const Icon(Icons.add),
-                                ),
-                              ],
+                            QuantityStepperRow(
+                              controller: _servingsController,
+                              value: _servings,
+                              step: 0.25,
+                              min: 0.25,
+                              max: 99,
+                              onDecrement: () {
+                                final next = (_servings - 0.25)
+                                    .clamp(0.25, 99)
+                                    .toDouble();
+                                setState(() => _servings = next);
+                                _servingsController.text =
+                                    _servingLabel(_servings);
+                                setSheetState(() {});
+                              },
+                              onIncrement: () {
+                                final next = (_servings + 0.25)
+                                    .clamp(0.25, 99)
+                                    .toDouble();
+                                setState(() => _servings = next);
+                                _servingsController.text =
+                                    _servingLabel(_servings);
+                                setSheetState(() {});
+                              },
+                              onTextChanged: (value) {
+                                final parsed = double.tryParse(
+                                  value.replaceAll(',', '.'),
+                                );
+                                if (parsed == null || parsed <= 0) return;
+                                setState(() => _servings = parsed);
+                                setSheetState(() {});
+                              },
                             ),
                             const SizedBox(height: 8),
                             Text(

@@ -1,5 +1,6 @@
 package com.example.nutrilens_mobile_app.ar
 
+import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -43,6 +44,16 @@ class ArController(
         this.view = view
     }
 
+    /** No-ops if no AR view is currently active — safe to call unconditionally
+     *  from Activity.onPause/onResume regardless of which screen is showing. */
+    fun pauseActiveSession() {
+        view?.pauseSession()
+    }
+
+    fun resumeActiveSession() {
+        view?.resumeSession()
+    }
+
     fun emitDistance(distanceCm: Double?, stable: Boolean, depthSource: String) {
         val sink = eventSink ?: return
         mainHandler.post {
@@ -56,15 +67,60 @@ class ArController(
         }
     }
 
+    /**
+     * Reports that the ARCore session itself failed to start (e.g. camera
+     * permission denied at the OS level despite the Dart-side pre-check, or
+     * the camera being held by another app). Without this, [ensureSession]
+     * failures previously degraded silently into "distance stays null
+     * forever", indistinguishable on screen from "still searching for a
+     * surface".
+     */
+    fun emitSessionError(message: String) {
+        val sink = eventSink ?: return
+        mainHandler.post {
+            sink.success(
+                buildMap<String, Any> {
+                    put("stable", false)
+                    put("depthSource", "none")
+                    put("error", message)
+                },
+            )
+        }
+    }
+
     private fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "checkCapability" -> result.success(checkCapability())
+            "requestInstall" -> {
+                requestInstall()
+                result.success(null)
+            }
             "captureFrame" -> captureFrame(result)
             "dispose" -> {
                 view = null
                 result.success(null)
             }
             else -> result.notImplemented()
+        }
+    }
+
+    /**
+     * Launches the "Google Play Services for AR" install/update flow for a
+     * [ArCapability.needsInstall] device. Per ARCore's own contract this must
+     * only be called in direct response to an explicit user action (the
+     * Dart-side "Cài đặt" button tap satisfies that). The result isn't
+     * synchronous — the host Activity pauses while the user is in the Play
+     * Store, and the Dart side re-probes `checkCapability` once the app
+     * resumes, so there's nothing useful to return here beyond "we tried".
+     */
+    private fun requestInstall() {
+        val activity = context as? Activity ?: return
+        try {
+            ArCoreApk.getInstance().requestInstall(activity, true)
+        } catch (e: Exception) {
+            // UnavailableDeviceNotCompatibleException / UnavailableUserDeclinedInstallationException:
+            // nothing actionable here — the resume-triggered re-check on the
+            // Dart side falls back to the plain camera regardless.
         }
     }
 

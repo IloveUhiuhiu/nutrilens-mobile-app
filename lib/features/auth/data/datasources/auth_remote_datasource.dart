@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import '../../../../core/config/api_endpoints.dart';
 import '../../../../core/network/dio_client.dart';
 import '../models/auth_session_model.dart';
@@ -28,6 +30,8 @@ abstract class AuthRemoteDataSource {
     required String oldPassword,
     required String newPassword,
   });
+
+  Future<String?> refreshAccessToken(String refreshToken);
 }
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
@@ -112,5 +116,20 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         'new_password': newPassword,
       },
     );
+  }
+
+  @override
+  Future<String?> refreshAccessToken(String refreshToken) async {
+    final response = await _client.post<Map<String, dynamic>>(
+      ApiEndpoints.authTokenRefresh,
+      data: {'refresh': refreshToken},
+      // Avoids AuthInterceptor retrying this same call on a 401 (the refresh
+      // token itself being invalid/expired), which would just duplicate the
+      // request instead of fixing anything.
+      options: Options(extra: {'skip_auth_refresh': true}),
+    );
+    final data = response.data?['data'];
+    final accessToken = data is Map ? '${data['access'] ?? ''}' : '';
+    return accessToken.isEmpty ? null : accessToken;
   }
 }

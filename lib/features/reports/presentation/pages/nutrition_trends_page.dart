@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/config/api_endpoints.dart';
@@ -108,10 +109,7 @@ class _NutritionTrendsPageState extends State<NutritionTrendsPage> {
                     const SizedBox(height: 12),
                     SizedBox(
                       height: 220,
-                      child: CustomPaint(
-                        painter: _TrendChartPainter(_points),
-                        child: const SizedBox.expand(),
-                      ),
+                      child: _TrendLineChart(points: _points),
                     ),
                     const SizedBox(height: 8),
                     const Row(
@@ -144,29 +142,7 @@ class _NutritionTrendsPageState extends State<NutritionTrendsPage> {
                     const SizedBox(height: 18),
                     SizedBox(
                       height: 180,
-                      child: CustomPaint(
-                        painter: _MacroDonutPainter(_summary),
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '${_summary.total.toStringAsFixed(0)}%',
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              const Text(
-                                'macro',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      child: _MacroDonutChart(summary: _summary),
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -206,102 +182,131 @@ class _NutritionTrendsPageState extends State<NutritionTrendsPage> {
   }
 }
 
-class _TrendChartPainter extends CustomPainter {
-  const _TrendChartPainter(this.points);
+class _TrendLineChart extends StatelessWidget {
+  const _TrendLineChart({required this.points});
 
   final List<_TrendPoint> points;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    if (points.isEmpty) return;
+  Widget build(BuildContext context) {
+    if (points.isEmpty) return const SizedBox.shrink();
     final maxValue = points
         .map((point) =>
             point.calories > point.target ? point.calories : point.target)
         .reduce((a, b) => a > b ? a : b);
-    final minValue = 0.0;
-    final usableHeight = size.height - 24;
-    final stepX =
-        points.length == 1 ? size.width : size.width / (points.length - 1);
-    double yFor(double value) {
-      final ratio = (value - minValue) / (maxValue - minValue);
-      return usableHeight - ratio * usableHeight + 12;
-    }
 
-    final targetPaint = Paint()
-      ..color = AppTheme.accent.withValues(alpha: 0.7)
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
-    final targetY = yFor(points.first.target);
-    canvas.drawLine(
-        Offset(0, targetY), Offset(size.width, targetY), targetPaint);
-
-    final linePaint = Paint()
-      ..color = AppTheme.primary
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    final path = Path();
-    for (var i = 0; i < points.length; i++) {
-      final point = Offset(i * stepX, yFor(points[i].calories));
-      if (i == 0) {
-        path.moveTo(point.dx, point.dy);
-      } else {
-        path.lineTo(point.dx, point.dy);
-      }
-    }
-    canvas.drawPath(path, linePaint);
-
-    for (var i = 0; i < points.length; i++) {
-      final point = Offset(i * stepX, yFor(points[i].calories));
-      final color = points[i].calories > points[i].target
-          ? AppTheme.danger
-          : AppTheme.fat;
-      canvas.drawCircle(point, 5, Paint()..color = color);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _TrendChartPainter oldDelegate) {
-    return oldDelegate.points != points;
+    return LineChart(
+      LineChartData(
+        minY: 0,
+        maxY: maxValue * 1.15,
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        titlesData: const FlTitlesData(
+          leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        extraLinesData: ExtraLinesData(
+          horizontalLines: [
+            HorizontalLine(
+              y: points.first.target,
+              color: AppTheme.accent.withValues(alpha: 0.7),
+              strokeWidth: 2,
+            ),
+          ],
+        ),
+        lineTouchData: LineTouchData(
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipColor: (_) => AppTheme.textPrimary,
+            getTooltipItems: (spots) => spots.map((spot) {
+              return LineTooltipItem(
+                '${spot.y.toStringAsFixed(0)} kcal',
+                const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+              );
+            }).toList(),
+          ),
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: [
+              for (var i = 0; i < points.length; i++)
+                FlSpot(i.toDouble(), points[i].calories),
+            ],
+            isCurved: true,
+            color: AppTheme.primary,
+            barWidth: 3,
+            dotData: FlDotData(
+              getDotPainter: (spot, percent, bar, index) {
+                final over = points[index].calories > points[index].target;
+                return FlDotCirclePainter(
+                  radius: 5,
+                  color: over ? AppTheme.danger : AppTheme.fat,
+                  strokeWidth: 0,
+                );
+              },
+            ),
+            belowBarData: BarAreaData(
+              show: true,
+              color: AppTheme.primary.withValues(alpha: 0.08),
+            ),
+          ),
+        ],
+      ),
+      duration: const Duration(milliseconds: 350),
+    );
   }
 }
 
-class _MacroDonutPainter extends CustomPainter {
-  const _MacroDonutPainter(this.summary);
+class _MacroDonutChart extends StatelessWidget {
+  const _MacroDonutChart({required this.summary});
 
   final _MacroSummaryData summary;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromCircle(
-      center: Offset(size.width / 2, size.height / 2),
-      radius: size.shortestSide / 2 - 12,
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        PieChart(
+          PieChartData(
+            sectionsSpace: 3,
+            centerSpaceRadius: 48,
+            sections: [
+              PieChartSectionData(
+                value: summary.protein,
+                color: AppTheme.protein,
+                showTitle: false,
+                radius: 18,
+              ),
+              PieChartSectionData(
+                value: summary.carbs,
+                color: AppTheme.carb,
+                showTitle: false,
+                radius: 18,
+              ),
+              PieChartSectionData(
+                value: summary.fat,
+                color: AppTheme.fat,
+                showTitle: false,
+                radius: 18,
+              ),
+            ],
+          ),
+          duration: const Duration(milliseconds: 350),
+        ),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${summary.total.toStringAsFixed(0)}%',
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+            ),
+            const Text('macro', style: TextStyle(color: AppTheme.textSecondary)),
+          ],
+        ),
+      ],
     );
-    var start = -90.0;
-    for (final item in [
-      (summary.protein, AppTheme.protein),
-      (summary.carbs, AppTheme.carb),
-      (summary.fat, AppTheme.fat),
-    ]) {
-      final sweep = item.$1 / summary.total * 360;
-      canvas.drawArc(
-        rect,
-        start * 3.14159 / 180,
-        sweep * 3.14159 / 180,
-        false,
-        Paint()
-          ..color = item.$2
-          ..strokeWidth = 18
-          ..strokeCap = StrokeCap.round
-          ..style = PaintingStyle.stroke,
-      );
-      start += sweep;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _MacroDonutPainter oldDelegate) {
-    return oldDelegate.summary != summary;
   }
 }
 

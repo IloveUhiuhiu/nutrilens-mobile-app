@@ -6,6 +6,7 @@ import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/onboarding_page.dart';
 import '../../features/auth/presentation/pages/otp_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
+import '../../features/auth/presentation/pages/splash_page.dart';
 import '../../features/capture/presentation/pages/ar_capture_page.dart';
 import '../../features/capture/presentation/pages/capture_gate.dart';
 import '../../features/food_scan/presentation/pages/camera_scan_page.dart';
@@ -33,9 +34,13 @@ class AppRouter {
   const AppRouter._();
 
   static final GoRouter router = GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/splash',
     routes: [
       GoRoute(path: '/', builder: (context, state) => const HomePage()),
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashPage(),
+      ),
       GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
       GoRoute(
         path: '/register',

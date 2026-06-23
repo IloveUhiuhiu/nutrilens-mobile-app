@@ -11,6 +11,9 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
     private let sceneView = ARSCNView()
     private weak var controller: ArController?
     private var distanceWindow: [Double] = []
+    // Retained so resumeSession() can re-run the exact same configuration
+    // after the app comes back from the background, instead of rebuilding it.
+    private let configuration = ARWorldTrackingConfiguration()
 
     private let stabilityWindow = 8
     private let stabilityStdCm = 1.0
@@ -31,7 +34,6 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
         sceneView.session.delegate = self
         sceneView.automaticallyUpdatesLighting = true
 
-        let configuration = ARWorldTrackingConfiguration()
         configuration.planeDetection = [.horizontal]
         if lidarAvailable {
             configuration.frameSemantics.insert(.sceneDepth)
@@ -44,6 +46,20 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
 
     func dispose() {
         sceneView.session.pause()
+    }
+
+    /// Called when the app is backgrounded mid-scan. Without this, the
+    /// ARKit session (and the camera it holds) kept running even while the
+    /// app wasn't visible.
+    func pauseSession() {
+        sceneView.session.pause()
+    }
+
+    /// Resumes with the same configuration, no reset — ARKit relocalizes
+    /// automatically if tracking was lost while paused, which is preferable
+    /// to throwing away the user's in-progress scan.
+    func resumeSession() {
+        sceneView.session.run(configuration, options: [])
     }
 
     // MARK: - ARSessionDelegate
@@ -62,6 +78,10 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
         let variance = distanceWindow.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(distanceWindow.count)
         let stable = distanceWindow.count >= stabilityWindow && variance.squareRoot() < stabilityStdCm
         controller?.emitDistance(mean, stable: stable, depthSource: depthSource)
+    }
+
+    func session(_ session: ARSession, didFailWithError error: Error) {
+        controller?.emitSessionError(error.localizedDescription)
     }
 
     // MARK: - Capture

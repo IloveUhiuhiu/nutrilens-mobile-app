@@ -38,4 +38,23 @@ class ArCapabilityChannel {
       return ArCapability.unsupported;
     }
   }
+
+  /// Launches the Play Store "Google Play Services for AR" install/update
+  /// flow (Android only — a no-op on iOS, which never reports [ArCapability.needsInstall]
+  /// in the first place). Must only be called in direct response to an
+  /// explicit user tap, per ARCore's own contract.
+  ///
+  /// This doesn't return whether installation succeeded — the host Activity
+  /// pauses while the user is in the Play Store, so the caller should
+  /// re-probe [check] once the app resumes instead of awaiting a result here.
+  Future<void> requestInstall() async {
+    try {
+      await _channel.invokeMethod('requestInstall');
+    } on PlatformException {
+      // Nothing actionable — the resume-triggered re-check falls back to
+      // the plain camera regardless.
+    } on MissingPluginException {
+      // ignore
+    }
+  }
 }

@@ -40,9 +40,15 @@ class ScanResultPage extends StatelessWidget {
             );
           }
         },
+        // A failed save briefly emits FoodScanError then re-emits the
+        // previous FoodScanResultReady so the toast above can fire — without
+        // this, the builder below would flash the "no result" empty state
+        // for one frame in between, since FoodScanError isn't
+        // FoodScanResultReady. listener still runs for every state either way.
+        buildWhen: (previous, current) => current is FoodScanResultReady,
         builder: (context, state) {
           if (state is! FoodScanResultReady) {
-            return const Center(child: Text('Chưa có kết quả phân tích.'));
+            return _NoResultView(onBack: () => context.go('/scan'));
           }
 
           return ListView(
@@ -148,6 +154,49 @@ class ScanResultPage extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _NoResultView extends StatelessWidget {
+  const _NoResultView({required this.onBack});
+
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.search_off_rounded,
+              size: 48,
+              color: AppTheme.textSecondary,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Chưa có kết quả phân tích',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Có thể bạn vừa quay lại màn hình này trực tiếp. Hãy quét lại món ăn để xem kết quả.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: onBack,
+              icon: const Icon(Icons.camera_alt_outlined),
+              label: const Text('Quét món ăn'),
+            ),
+          ],
+        ),
       ),
     );
   }

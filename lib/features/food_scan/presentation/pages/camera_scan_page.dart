@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/idempotency.dart';
@@ -31,6 +32,7 @@ class _CameraScanPageState extends State<CameraScanPage>
       const CameraIntrinsicsService();
   Future<void>? _initializeCameraFuture;
   String? _cameraError;
+  bool _cameraPermissionDenied = false;
   bool _isCapturing = false;
 
   @override
@@ -184,7 +186,18 @@ class _CameraScanPageState extends State<CameraScanPage>
       builder: (context, snapshot) {
         final controller = _controller;
         if (_cameraError != null) {
-          return _CameraMessage(message: _cameraError!);
+          return _CameraMessage(
+            message: _cameraError!,
+            onRetry: () {
+              setState(() {
+                _cameraError = null;
+                _cameraPermissionDenied = false;
+                _initializeCameraFuture = _initializeCamera();
+              });
+            },
+            onOpenSettings:
+                _cameraPermissionDenied ? () => openAppSettings() : null,
+          );
         }
         if (snapshot.connectionState != ConnectionState.done ||
             controller == null ||
@@ -236,9 +249,11 @@ class _CameraScanPageState extends State<CameraScanPage>
 
       _controller = controller;
       _cameraError = null;
+      _cameraPermissionDenied = false;
       await previousController?.dispose();
     } on CameraException catch (error) {
-      _cameraError = error.code == 'CameraAccessDenied'
+      _cameraPermissionDenied = error.code == 'CameraAccessDenied';
+      _cameraError = _cameraPermissionDenied
           ? 'Ứng dụng chưa được cấp quyền camera.'
           : 'Không thể mở camera: ${error.description ?? error.code}.';
     }
@@ -428,9 +443,15 @@ class _CameraScanPageState extends State<CameraScanPage>
 }
 
 class _CameraMessage extends StatelessWidget {
-  const _CameraMessage({required this.message});
+  const _CameraMessage({
+    required this.message,
+    required this.onRetry,
+    this.onOpenSettings,
+  });
 
   final String message;
+  final VoidCallback onRetry;
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -444,13 +465,38 @@ class _CameraMessage extends StatelessWidget {
           end: Alignment.bottomCenter,
         ),
       ),
-      child: Text(
-        message,
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.videocam_off_outlined, color: Colors.white70, size: 48),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 20),
+          if (onOpenSettings != null) ...[
+            FilledButton.icon(
+              onPressed: onOpenSettings,
+              icon: const Icon(Icons.settings_outlined),
+              label: const Text('Mở cài đặt'),
             ),
+            const SizedBox(height: 8),
+          ],
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Thử lại'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: const BorderSide(color: Colors.white70),
+            ),
+          ),
+        ],
       ),
     );
   }

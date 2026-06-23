@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
@@ -22,6 +23,7 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
   static const _cancelButtonDelay = Duration(seconds: 5);
 
   bool _showCancelButton = false;
+  bool _cancelling = false;
   Timer? _cancelButtonTimer;
 
   @override
@@ -39,6 +41,9 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
   }
 
   void _onCancel(BuildContext context) {
+    if (_cancelling) return;
+    setState(() => _cancelling = true);
+    HapticFeedback.lightImpact();
     context.read<FoodScanBloc>().add(const FoodScanCancelRequested());
   }
 
@@ -60,7 +65,10 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
             return _FailureView(
               message: state.message,
               onRetry: () {
-                setState(() => _showCancelButton = false);
+                setState(() {
+                  _showCancelButton = false;
+                  _cancelling = false;
+                });
                 _cancelButtonTimer?.cancel();
                 _cancelButtonTimer = Timer(_cancelButtonDelay, () {
                   if (mounted) setState(() => _showCancelButton = true);
@@ -179,16 +187,17 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 10),
-                        Text(
-                          isProcessing
-                              ? 'Đang phân tích thành phần món ăn...'
-                              : 'Đang tải ảnh lên máy chủ AI...',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            height: 1.45,
+                        if (isProcessing)
+                          const _ProcessingStepLabel()
+                        else
+                          const Text(
+                            'Đang tải ảnh lên máy chủ AI...',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              height: 1.45,
+                            ),
                           ),
-                        ),
                         AnimatedSize(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeOut,
@@ -198,14 +207,33 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
                                   child: AnimatedOpacity(
                                     opacity: _showCancelButton ? 1.0 : 0.0,
                                     duration: const Duration(milliseconds: 300),
-                                    child: OutlinedButton.icon(
-                                      onPressed: () => _onCancel(context),
-                                      icon: const Icon(Icons.close),
-                                      label: const Text('Dừng quá trình phân tích'),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: AppTheme.danger,
-                                        side: const BorderSide(
-                                          color: AppTheme.danger,
+                                    child: SizedBox(
+                                      height: 48,
+                                      child: OutlinedButton.icon(
+                                        onPressed: _cancelling
+                                            ? null
+                                            : () => _onCancel(context),
+                                        icon: _cancelling
+                                            ? const SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                ),
+                                              )
+                                            : const Icon(
+                                                Icons.stop_circle_outlined,
+                                              ),
+                                        label: Text(
+                                          _cancelling
+                                              ? 'Đang dừng...'
+                                              : 'Dừng phân tích',
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: AppTheme.outline,
+                                          side: const BorderSide(
+                                            color: AppTheme.outline,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -221,6 +249,61 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Cycles through cosmetic sub-step labels while the AI is processing, so
+/// the user always sees the screen is progressing — the backend reports no
+/// real sub-stages for this single long-running step, so this is presentation
+/// only and never claims a stage the backend hasn't actually reached.
+class _ProcessingStepLabel extends StatefulWidget {
+  const _ProcessingStepLabel();
+
+  static const _labels = [
+    'Đang nhận diện món ăn...',
+    'Đang phân tích dinh dưỡng...',
+    'Đang hoàn thiện kết quả...',
+  ];
+
+  @override
+  State<_ProcessingStepLabel> createState() => _ProcessingStepLabelState();
+}
+
+class _ProcessingStepLabelState extends State<_ProcessingStepLabel> {
+  int _index = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(
+        () => _index = (_index + 1) % _ProcessingStepLabel._labels.length,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: Text(
+        _ProcessingStepLabel._labels[_index],
+        key: ValueKey(_index),
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: AppTheme.textSecondary,
+          height: 1.45,
+        ),
       ),
     );
   }
