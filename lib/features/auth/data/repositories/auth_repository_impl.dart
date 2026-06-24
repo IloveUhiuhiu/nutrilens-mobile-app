@@ -87,13 +87,15 @@ class AuthRepositoryImpl implements AuthRepository {
         return false;
       }
 
-      final newAccessToken =
-          await _remoteDataSource.refreshAccessToken(refreshToken);
-      if (newAccessToken == null || newAccessToken.isEmpty) {
+      final refreshed = await _remoteDataSource.refreshAccessToken(refreshToken);
+      if (refreshed == null || refreshed.access.isEmpty) {
         await _tokenStorage.clearTokens();
         return false;
       }
-      await _tokenStorage.saveAccessToken(newAccessToken);
+      await _tokenStorage.saveTokens(
+        accessToken: refreshed.access,
+        refreshToken: refreshed.refresh,
+      );
       return true;
     } catch (_) {
       // Covers both a failed refresh call and the token storage itself being

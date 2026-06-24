@@ -22,7 +22,25 @@ class FoodScanBloc extends Bloc<FoodScanEvent, FoodScanState> {
 
   final FoodScanRepository _repository;
   static const _pollInterval = Duration(seconds: 3);
-  static const _maxPollAttempts = 40; // 40 × 3s = 120s total
+
+  // How long the job may continuously report "running"/"retrying"
+  // (server-side AI call in progress, including its own retries) before
+  // it's treated as stuck rather than legitimately slow. Worst-case AI
+  // latency with retries is AI_SERVER_TIMEOUT=60s × up to 3 attempts + 2
+  // backoffs of a few seconds each ≈ 3 min (see inference/tasks.py on the
+  // backend) — 4 min gives a ~1 min buffer without making the user wait
+  // unnecessarily long for a job that's actually stuck.
+  static const _stuckRunningThreshold = Duration(minutes: 4);
+
+  // "pending" means no worker has picked the job up yet — under normal
+  // load this should resolve to "running" within seconds, so a much
+  // shorter threshold is enough to call it stuck.
+  static const _stuckPendingThreshold = Duration(minutes: 1);
+
+  // Absolute backstop independent of reported status, in case status keeps
+  // flapping between pending/running just under each threshold above
+  // without ever actually finishing.
+  static const _maxTotalPollDuration = Duration(minutes: 15);
 
   // Bumped on every new upload/retry/cancel. A poll loop captures the
   // generation it was started with and checks it before every emit — if the
@@ -118,15 +136,39 @@ class FoodScanBloc extends Bloc<FoodScanEvent, FoodScanState> {
     // otherwise hide e.g. "no connection for the last two minutes" behind a
     // message that reads like the AI was just slow.
     String? lastTransientError;
+    final pollStartedAt = DateTime.now();
+    // Set the first time each respective status is observed, cleared the
+    // moment the job leaves that status — so "stuck" means continuously in
+    // that state, not just cumulatively. A backend-side reclaim (stale
+    // "running" job picked up fresh by another worker) naturally resets
+    // this instead of counting against the new attempt.
+    DateTime? pendingSince;
+    DateTime? runningSince;
+    var isFirstAttempt = true;
 
     try {
-      for (var attempt = 0; attempt < _maxPollAttempts; attempt++) {
-        if (attempt > 0) {
+      while (true) {
+        if (DateTime.now().difference(pollStartedAt) > _maxTotalPollDuration) {
+          if (_isStale(generation)) return;
+          emit(
+            FoodScanPollingFailed(
+              imagePath: imagePath,
+              jobId: jobId,
+              message: lastTransientError == null
+                  ? 'Hết thời gian chờ phân tích AI. Vui lòng thử lại.'
+                  : 'Hết thời gian chờ phân tích AI, có thể do lỗi kết nối: $lastTransientError',
+            ),
+          );
+          return;
+        }
+
+        if (!isFirstAttempt) {
           await Future<void>.delayed(_pollInterval);
           // Check after the delay in case a cancel/new scan arrived while
           // this loop was waiting.
           if (_isStale(generation)) return;
         }
+        isFirstAttempt = false;
 
         try {
           final status = await _repository.getJobStatus(jobId);
@@ -144,9 +186,37 @@ class FoodScanBloc extends Bloc<FoodScanEvent, FoodScanState> {
           }
 
           if (status.isPending) {
+            runningSince = null;
+            pendingSince ??= DateTime.now();
+            if (DateTime.now().difference(pendingSince) > _stuckPendingThreshold) {
+              emit(
+                FoodScanPollingFailed(
+                  imagePath: imagePath,
+                  jobId: jobId,
+                  message: 'Hệ thống chưa bắt đầu xử lý ảnh sau hơn 1 phút. Vui lòng thử lại.',
+                ),
+              );
+              return;
+            }
             emit(FoodScanUploading(imagePath));
           } else if (status.isProcessing) {
+            pendingSince = null;
+            runningSince ??= DateTime.now();
+            if (DateTime.now().difference(runningSince) > _stuckRunningThreshold) {
+              emit(
+                FoodScanPollingFailed(
+                  imagePath: imagePath,
+                  jobId: jobId,
+                  message:
+                      'Quá trình phân tích AI có vẻ đang bị treo (đã hơn 6 phút không có kết quả). Vui lòng thử lại.',
+                ),
+              );
+              return;
+            }
             emit(FoodScanProcessing(imagePath: imagePath, jobId: jobId));
+          } else {
+            pendingSince = null;
+            runningSince = null;
           }
 
           // Khi server báo đã xong (hoặc status không nhận dạng được),
@@ -197,32 +267,13 @@ class FoodScanBloc extends Bloc<FoodScanEvent, FoodScanState> {
           return;
         } on ApiException catch (error) {
           if (_isStale(generation)) return;
-          if (attempt == _maxPollAttempts - 1) {
-            emit(
-              FoodScanPollingFailed(
-                imagePath: imagePath,
-                jobId: jobId,
-                message: error.message,
-              ),
-            );
-            return;
-          }
-          // Transient error before the last attempt: swallow and retry, but
-          // remember it in case we end up timing out below.
+          // Transient network/server error on the status check itself —
+          // swallow and retry. The absolute backstop at the top of the loop
+          // is what eventually gives up, not an attempt count; remember the
+          // message in case we end up there.
           lastTransientError = error.message;
         }
       }
-
-      if (_isStale(generation)) return;
-      emit(
-        FoodScanPollingFailed(
-          imagePath: imagePath,
-          jobId: jobId,
-          message: lastTransientError == null
-              ? 'Hết thời gian chờ phân tích AI. Vui lòng thử lại.'
-              : 'Hết thời gian chờ phân tích AI, có thể do lỗi kết nối: $lastTransientError',
-        ),
-      );
     } on RequestCancelledException {
       return;
     } catch (error) {

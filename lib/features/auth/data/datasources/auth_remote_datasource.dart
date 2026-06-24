@@ -31,7 +31,9 @@ abstract class AuthRemoteDataSource {
     required String newPassword,
   });
 
-  Future<String?> refreshAccessToken(String refreshToken);
+  Future<({String access, String refresh})?> refreshAccessToken(
+    String refreshToken,
+  );
 }
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
@@ -119,7 +121,9 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   }
 
   @override
-  Future<String?> refreshAccessToken(String refreshToken) async {
+  Future<({String access, String refresh})?> refreshAccessToken(
+    String refreshToken,
+  ) async {
     final response = await _client.post<Map<String, dynamic>>(
       ApiEndpoints.authTokenRefresh,
       data: {'refresh': refreshToken},
@@ -128,8 +132,20 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       // request instead of fixing anything.
       options: Options(extra: {'skip_auth_refresh': true}),
     );
-    final data = response.data?['data'];
-    final accessToken = data is Map ? '${data['access'] ?? ''}' : '';
-    return accessToken.isEmpty ? null : accessToken;
+    // Stock simplejwt TokenRefreshView — returns {"access": ..., "refresh":
+    // ...} directly, unlike every other endpoint which wraps in "data".
+    final body = response.data ?? const <String, dynamic>{};
+    final accessToken = '${body['access'] ?? ''}';
+    if (accessToken.isEmpty) {
+      return null;
+    }
+    // Backend rotates + blacklists the old refresh token on every refresh
+    // (ROTATE_REFRESH_TOKENS/BLACKLIST_AFTER_ROTATION) — the new one must be
+    // returned so the caller persists it, or the next refresh attempt fails.
+    final newRefreshToken = '${body['refresh'] ?? ''}';
+    return (
+      access: accessToken,
+      refresh: newRefreshToken.isNotEmpty ? newRefreshToken : refreshToken,
+    );
   }
 }

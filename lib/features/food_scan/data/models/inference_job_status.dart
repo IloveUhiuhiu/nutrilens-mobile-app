@@ -49,7 +49,12 @@ class InferenceJobStatus {
       status == 'running' ||
       status == 'in_progress' ||
       status == 'analyzing' ||
-      status == 'inferring';
+      status == 'inferring' ||
+      // Backend-side Celery autoretry is about to call the AI server again
+      // after a transient failure (timeout/5xx/network) — still "the AI is
+      // working on this", not a final outcome, so it must not be matched by
+      // isFailed below.
+      status == 'retrying';
 
   bool get isCompleted =>
       status == 'succeeded' ||  // ← backend Django dùng "succeeded"
