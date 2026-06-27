@@ -180,6 +180,7 @@ class FoodScanBloc extends Bloc<FoodScanEvent, FoodScanState> {
                 imagePath: imagePath,
                 jobId: jobId,
                 message: status.failureMessage,
+                errorCode: status.errorCode,
               ),
             );
             return;

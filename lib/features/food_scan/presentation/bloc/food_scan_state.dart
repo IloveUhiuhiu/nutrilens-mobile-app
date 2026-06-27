@@ -40,14 +40,19 @@ class FoodScanPollingFailed extends FoodScanState {
     required this.imagePath,
     required this.message,
     this.jobId,
+    this.errorCode,
   });
 
   final String imagePath;
   final String? jobId;
   final String message;
+  // Mã lỗi nghiệp vụ từ AI server (vd. no_food_detected) khi job thất bại do
+  // status.isFailed — null cho các trường hợp timeout/stuck do mobile tự phát
+  // hiện. Dùng để chọn icon/tiêu đề cụ thể trên UI thay vì luôn hiện chung.
+  final String? errorCode;
 
   @override
-  List<Object?> get props => [imagePath, jobId, message];
+  List<Object?> get props => [imagePath, jobId, message, errorCode];
 }
 
 class FoodScanResultReady extends FoodScanState {
