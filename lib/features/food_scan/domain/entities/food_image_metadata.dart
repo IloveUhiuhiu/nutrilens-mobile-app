@@ -1,5 +1,38 @@
 import 'dart:math' as math;
 
+/// One AR raycast hit from the native ring-search (see ArKitPlatformView.
+/// swift / ArPlatformView.kt) — a screen pixel that landed on the detected
+/// table/plate plane that frame, with its own measured camera-to-plane
+/// distance. Native reports every candidate it found (outside-in, centre
+/// last) rather than picking one, since it has no way to know on-device
+/// which pixel will end up overlapping food once segmentation runs
+/// server-side; the backend picks the first non-food candidate itself.
+class AnchorCandidate {
+  const AnchorCandidate({
+    required this.pixelX,
+    required this.pixelY,
+    required this.distanceCm,
+  });
+
+  factory AnchorCandidate.fromMap(Map<dynamic, dynamic> map) {
+    return AnchorCandidate(
+      pixelX: (map['x'] as num).toDouble(),
+      pixelY: (map['y'] as num).toDouble(),
+      distanceCm: (map['distanceCm'] as num).toDouble(),
+    );
+  }
+
+  final double pixelX;
+  final double pixelY;
+  final double distanceCm;
+
+  Map<String, dynamic> toJson() => {
+        'pixel_x': pixelX,
+        'pixel_y': pixelY,
+        'distance_cm': distanceCm,
+      };
+}
+
 class FoodImageMetadata {
   const FoodImageMetadata({
     required this.fileName,
@@ -16,6 +49,7 @@ class FoodImageMetadata {
     this.cameraToObjectDistanceCm,
     this.anchorPixelX,
     this.anchorPixelY,
+    this.anchorCandidates,
     this.idempotencyKey = '',
     this.depthMapPath,
   });
@@ -59,6 +93,7 @@ class FoodImageMetadata {
     double? cameraToObjectDistanceCm,
     double? anchorPixelX,
     double? anchorPixelY,
+    List<AnchorCandidate>? anchorCandidates,
     String idempotencyKey = '',
     String? depthMapPath,
   }) {
@@ -80,6 +115,7 @@ class FoodImageMetadata {
       cameraToObjectDistanceCm: cameraToObjectDistanceCm,
       anchorPixelX: anchorPixelX,
       anchorPixelY: anchorPixelY,
+      anchorCandidates: anchorCandidates,
       idempotencyKey: idempotencyKey,
       depthMapPath: depthMapPath,
     );
@@ -113,6 +149,16 @@ class FoodImageMetadata {
   /// older app builds that didn't carry this through.
   final double? anchorPixelX;
   final double? anchorPixelY;
+
+  /// Every candidate point the native ring-search found landing on the
+  /// table/plate plane this frame (outside-in, screen centre last — see
+  /// ArKitPlatformView.swift / ArPlatformView.kt), each with its own
+  /// measured distance. The backend tries them in this order and uses the
+  /// first that doesn't land on food once segmentation runs, since neither
+  /// this app nor native AR code can know that ahead of time. Null/empty on
+  /// older app builds that only carry the single legacy
+  /// [anchorPixelX]/[anchorPixelY] pair.
+  final List<AnchorCandidate>? anchorCandidates;
 
   /// Stable per-capture token sent as the `Idempotency-Key` header so the
   /// backend dedupes retries of the same capture to a single inference job.
@@ -156,6 +202,9 @@ class FoodImageMetadata {
         'anchor_pixel_x': anchorPixelX,
         'anchor_pixel_y': anchorPixelY,
       },
+      if (anchorCandidates != null && anchorCandidates!.isNotEmpty)
+        'anchor_candidates':
+            anchorCandidates!.map((candidate) => candidate.toJson()).toList(),
     };
   }
 }

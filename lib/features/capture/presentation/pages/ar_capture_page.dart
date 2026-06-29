@@ -118,6 +118,10 @@ class _ArCapturePageState extends State<ArCapturePage> {
       if (result == null || !mounted) return;
 
       final imagePath = result['imagePath'] as String;
+      final rawCandidates = result['anchorCandidates'] as List<dynamic>?;
+      final anchorCandidates = rawCandidates
+          ?.map((entry) => AnchorCandidate.fromMap(entry as Map<dynamic, dynamic>))
+          .toList();
       final metadata = FoodImageMetadata.fromCameraIntrinsics(
         fileName: imagePath.split('/').last,
         width: (result['width'] as num).toInt(),
@@ -131,6 +135,7 @@ class _ArCapturePageState extends State<ArCapturePage> {
         cameraToObjectDistanceCm: (result['distanceCm'] as num?)?.toDouble(),
         anchorPixelX: (result['anchorPixelX'] as num?)?.toDouble(),
         anchorPixelY: (result['anchorPixelY'] as num?)?.toDouble(),
+        anchorCandidates: anchorCandidates,
         idempotencyKey: generateIdempotencyKey(),
         // Present only on tier-1 ToF/LiDAR (and tier-2 ARCore
         // depth-from-motion) devices — see ArPlatformView.kt /

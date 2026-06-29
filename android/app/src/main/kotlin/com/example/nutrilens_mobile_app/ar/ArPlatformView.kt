@@ -227,16 +227,20 @@ class ArPlatformView(
         return null
     }
 
-    /** Candidate points for the anchor search: viewport centre first, then
-     * rings expanding outward (up to 90% of the half-extent, leaving a ~10%
-     * margin near the edges where lens distortion is worst). */
+    /** Candidate points for the anchor search: rings from the outer edge
+     * inward (up to 90% of the half-extent, leaving a ~10% margin near the
+     * edges where lens distortion is worst), viewport centre tried *last*.
+     * The user always frames the food near the centre, so the centre point
+     * is the single most likely candidate to land on food once segmented —
+     * trying it last (rather than first, as before) means the ring search
+     * only falls back to it when nothing further out hit the plane. */
     private fun candidateAnchorPoints(): List<PointF> {
         val cx = viewportWidth / 2f
         val cy = viewportHeight / 2f
         val halfW = viewportWidth / 2f
         val halfH = viewportHeight / 2f
-        val points = mutableListOf(PointF(cx, cy))
-        for (radiusFraction in ANCHOR_RING_RADIUS_FRACTIONS) {
+        val points = mutableListOf<PointF>()
+        for (radiusFraction in ANCHOR_RING_RADIUS_FRACTIONS.reversed()) {
             for (i in 0 until ANCHOR_RING_ANGLE_COUNT) {
                 val angle = (i.toFloat() / ANCHOR_RING_ANGLE_COUNT) * 2f * Math.PI.toFloat()
                 val dx = cos(angle) * radiusFraction * halfW
@@ -244,7 +248,18 @@ class ArPlatformView(
                 points.add(PointF(cx + dx, cy + dy))
             }
         }
+        points.add(PointF(cx, cy))
         return points
+    }
+
+    /** All candidate points that currently land on the plane this frame, in
+     * the same outside-in priority order as [candidateAnchorPoints] — used
+     * at capture time so the server has multiple options to choose from
+     * once it knows where food actually is (this side can't know that). */
+    private fun allValidAnchorHits(frame: Frame): List<Pair<PointF, HitResult>> {
+        return candidateAnchorPoints().mapNotNull { candidate ->
+            planeHit(frame, candidate)?.let { candidate to it }
+        }
     }
 
     /**
@@ -315,9 +330,14 @@ class ArPlatformView(
                 val focal = intrinsics.focalLength       // [fx, fy] in pixels
                 val principal = intrinsics.principalPoint // [cx, cy] in pixels
                 val dims = intrinsics.imageDimensions     // [width, height]
-                val anchor = findAnchorHit(frame)
-                val distanceCm = anchor?.second?.let { it.distance * 100.0 }
-                val anchorPixel = anchor?.let { imagePixel(frame, it.first) }
+                // Every candidate that currently lands on the plane this
+                // frame — not just one — since this side has no way to know
+                // which screen pixel will turn out to overlap food once
+                // segmentation runs server-side. Each candidate carries its
+                // own real measured distance; the server picks whichever
+                // one doesn't land on food, in priority order (see
+                // candidateAnchorPoints).
+                val hits = allValidAnchorHits(frame)
                 val depthMapPath = if (depthEnabled) acquireDepthNpyPath(frame) else null
                 buildMap {
                     put("imagePath", jpegPath)
@@ -327,10 +347,25 @@ class ArPlatformView(
                     put("fy", focal[1].toDouble())
                     put("cx", principal[0].toDouble())
                     put("cy", principal[1].toDouble())
-                    if (distanceCm != null) put("distanceCm", distanceCm)
-                    if (anchorPixel != null) {
-                        put("anchorPixelX", anchorPixel[0].toDouble())
-                        put("anchorPixelY", anchorPixel[1].toDouble())
+                    if (hits.isNotEmpty()) {
+                        val candidates = hits.mapNotNull { (point, hit) ->
+                            val pixel = imagePixel(frame, point) ?: return@mapNotNull null
+                            mapOf(
+                                "x" to pixel[0].toDouble(),
+                                "y" to pixel[1].toDouble(),
+                                "distanceCm" to hit.distance * 100.0,
+                            )
+                        }
+                        put("anchorCandidates", candidates)
+                        // Legacy single-point fields, kept for older server
+                        // builds / rollback safety — first candidate is the
+                        // highest-priority one.
+                        val (firstPoint, firstHit) = hits[0]
+                        put("distanceCm", firstHit.distance * 100.0)
+                        imagePixel(frame, firstPoint)?.let { pixel ->
+                            put("anchorPixelX", pixel[0].toDouble())
+                            put("anchorPixelY", pixel[1].toDouble())
+                        }
                     }
                     if (depthMapPath != null) {
                         put("depthMapPath", depthMapPath)

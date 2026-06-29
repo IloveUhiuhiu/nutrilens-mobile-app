@@ -111,9 +111,27 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
             "cx": Double(intrinsics.columns.2.x),
             "cy": Double(intrinsics.columns.2.y),
         ]
-        if let anchor = findAnchorPoint(frame: frame) {
-            payload["distanceCm"] = anchor.distanceCm
-            if let pixel = imagePixel(forViewPoint: anchor.point, frame: frame) {
+        // Gather every candidate that currently lands on the plane this
+        // frame — not just one — since this side has no way to know which
+        // screen pixel will turn out to overlap food once segmentation runs
+        // server-side. Each candidate carries its own real measured
+        // distance; the server picks whichever one doesn't land on food
+        // after segmentation, in priority order (see candidateAnchorPoints).
+        let candidates = allValidAnchorCandidates(frame: frame)
+        if !candidates.isEmpty {
+            payload["anchorCandidates"] = candidates.compactMap { candidate -> [String: Any]? in
+                guard let pixel = imagePixel(forViewPoint: candidate.point, frame: frame) else { return nil }
+                return [
+                    "x": Double(pixel.x),
+                    "y": Double(pixel.y),
+                    "distanceCm": candidate.distanceCm,
+                ]
+            }
+            // Legacy single-point fields, kept for older server builds /
+            // rollback safety — first candidate is the highest-priority one.
+            let first = candidates[0]
+            payload["distanceCm"] = first.distanceCm
+            if let pixel = imagePixel(forViewPoint: first.point, frame: frame) {
                 payload["anchorPixelX"] = Double(pixel.x)
                 payload["anchorPixelY"] = Double(pixel.y)
             }
@@ -230,16 +248,20 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
         return Double(meters) * 100.0
     }
 
-    /// Candidate points for the anchor search: screen centre first, then
-    /// rings expanding outward (up to 90% of the half-extent, leaving a ~10%
-    /// margin near the edges where lens distortion is worst).
+    /// Candidate points for the anchor search: rings from the outer edge
+    /// inward (up to 90% of the half-extent, leaving a ~10% margin near the
+    /// edges where lens distortion is worst), screen centre tried *last*.
+    /// The user always frames the food near the centre, so the centre point
+    /// is the single most likely candidate to land on food once segmented —
+    /// trying it last (rather than first, as before) means the ring search
+    /// only falls back to it when nothing further out hit the plane.
     private func candidateAnchorPoints(in bounds: CGRect) -> [CGPoint] {
         let cx = bounds.midX
         let cy = bounds.midY
         let halfW = bounds.width / 2
         let halfH = bounds.height / 2
-        var points: [CGPoint] = [CGPoint(x: cx, y: cy)]
-        for radiusFraction in Self.anchorRingRadiusFractions {
+        var points: [CGPoint] = []
+        for radiusFraction in Self.anchorRingRadiusFractions.reversed() {
             for i in 0..<Self.anchorRingAngleCount {
                 let angle = (CGFloat(i) / CGFloat(Self.anchorRingAngleCount)) * 2 * .pi
                 let dx = cos(angle) * radiusFraction * halfW
@@ -247,7 +269,20 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
                 points.append(CGPoint(x: cx + dx, y: cy + dy))
             }
         }
+        points.append(CGPoint(x: cx, y: cy))
         return points
+    }
+
+    /// All candidate points that currently land on the plane this frame, in
+    /// the same outside-in priority order as `candidateAnchorPoints` — used
+    /// at capture time so the server has multiple options to choose from
+    /// once it knows where food actually is (this side can't know that).
+    private func allValidAnchorCandidates(frame: ARFrame) -> [(point: CGPoint, distanceCm: Double)] {
+        guard sceneView.bounds.width > 0, sceneView.bounds.height > 0 else { return [] }
+        return candidateAnchorPoints(in: sceneView.bounds).compactMap { candidate in
+            guard let distance = raycastDistanceCm(at: candidate, frame: frame) else { return nil }
+            return (candidate, distance)
+        }
     }
 
     /// Finds a screen point that currently lands on the detected horizontal
