@@ -228,7 +228,7 @@ class ArPlatformView(
     }
 
     /** Candidate points for the anchor search: rings from the outer edge
-     * inward (up to 90% of the half-extent, leaving a ~10% margin near the
+     * inward (up to 95% of the half-extent, leaving a ~5% margin near the
      * edges where lens distortion is worst), viewport centre tried *last*.
      * The user always frames the food near the centre, so the centre point
      * is the single most likely candidate to land on food once segmented —
@@ -475,7 +475,10 @@ class ArPlatformView(
     companion object {
         private const val STABILITY_WINDOW = 8
         private const val STABILITY_STD_CM = 1.0
-        private val ANCHOR_RING_RADIUS_FRACTIONS = floatArrayOf(0.15f, 0.30f, 0.45f)
-        private const val ANCHOR_RING_ANGLE_COUNT = 8
+        // The food plate routinely fills most of the screen width, so the
+        // search reaches almost to the visible preview edge (0.95x
+        // half-extent, ~5% margin left for lens distortion).
+        private val ANCHOR_RING_RADIUS_FRACTIONS = floatArrayOf(0.5f, 0.7f, 0.9f, 0.95f)
+        private const val ANCHOR_RING_ANGLE_COUNT = 10
     }
 }

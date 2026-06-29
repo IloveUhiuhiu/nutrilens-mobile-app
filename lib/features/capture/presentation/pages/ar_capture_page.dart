@@ -32,7 +32,7 @@ class _ArCapturePageState extends State<ArCapturePage> {
   static const _distanceEvents = EventChannel('nutrilens/ar/distance');
 
   static const _minDistanceCm = 20.0;
-  static const _maxDistanceCm = 40.0;
+  static const _maxDistanceCm = 50.0;
 
   StreamSubscription<dynamic>? _distanceSub;
   double? _distanceCm;

@@ -22,8 +22,11 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
     // falling back to a fresh search, so the on-screen dot doesn't jitter
     // between candidates while the same spot is still a valid plane hit.
     private var lastAnchorPoint: CGPoint?
-    private static let anchorRingRadiusFractions: [CGFloat] = [0.15, 0.30, 0.45]
-    private static let anchorRingAngleCount = 8
+    // The food plate routinely fills most of the screen width, so the
+    // search reaches almost to the visible preview edge (0.95x
+    // half-extent, ~5% margin left for lens distortion).
+    private static let anchorRingRadiusFractions: [CGFloat] = [0.5, 0.7, 0.9, 0.95]
+    private static let anchorRingAngleCount = 10
 
     // Set once at session start: ARKit only ever populates `sceneDepth` on
     // LiDAR-equipped devices, so unlike Android's ARCore Depth API this
@@ -249,7 +252,7 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
     }
 
     /// Candidate points for the anchor search: rings from the outer edge
-    /// inward (up to 90% of the half-extent, leaving a ~10% margin near the
+    /// inward (up to 95% of the half-extent, leaving a ~5% margin near the
     /// edges where lens distortion is worst), screen centre tried *last*.
     /// The user always frames the food near the centre, so the centre point
     /// is the single most likely candidate to land on food once segmented —
