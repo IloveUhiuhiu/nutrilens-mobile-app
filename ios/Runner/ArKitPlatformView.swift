@@ -18,6 +18,13 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
     private let stabilityWindow = 8
     private let stabilityStdCm = 1.0
 
+    // "Sticky" anchor point (view coordinates) — re-tested every frame before
+    // falling back to a fresh search, so the on-screen dot doesn't jitter
+    // between candidates while the same spot is still a valid plane hit.
+    private var lastAnchorPoint: CGPoint?
+    private static let anchorRingRadiusFractions: [CGFloat] = [0.15, 0.30, 0.45]
+    private static let anchorRingAngleCount = 8
+
     // Set once at session start: ARKit only ever populates `sceneDepth` on
     // LiDAR-equipped devices, so unlike Android's ARCore Depth API this
     // maps to a specific, knowable sensor tier rather than "depth API
@@ -65,19 +72,22 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
     // MARK: - ARSessionDelegate
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        guard let distance = centerDistanceCm(frame: frame) else {
+        guard let anchor = findAnchorPoint(frame: frame) else {
             distanceWindow.removeAll()
-            controller?.emitDistance(nil, stable: false, depthSource: depthSource)
+            controller?.emitDistance(nil, stable: false, depthSource: depthSource, anchorX: nil, anchorY: nil)
             return
         }
-        distanceWindow.append(distance)
+        distanceWindow.append(anchor.distanceCm)
         if distanceWindow.count > stabilityWindow {
             distanceWindow.removeFirst(distanceWindow.count - stabilityWindow)
         }
         let mean = distanceWindow.reduce(0, +) / Double(distanceWindow.count)
         let variance = distanceWindow.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(distanceWindow.count)
         let stable = distanceWindow.count >= stabilityWindow && variance.squareRoot() < stabilityStdCm
-        controller?.emitDistance(mean, stable: stable, depthSource: depthSource)
+        let bounds = sceneView.bounds
+        let anchorX = bounds.width > 0 ? Double(anchor.point.x / bounds.width) : nil
+        let anchorY = bounds.height > 0 ? Double(anchor.point.y / bounds.height) : nil
+        controller?.emitDistance(mean, stable: stable, depthSource: depthSource, anchorX: anchorX, anchorY: anchorY)
     }
 
     func session(_ session: ARSession, didFailWithError error: Error) {
@@ -101,8 +111,12 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
             "cx": Double(intrinsics.columns.2.x),
             "cy": Double(intrinsics.columns.2.y),
         ]
-        if let distance = centerDistanceCm(frame: frame) {
-            payload["distanceCm"] = distance
+        if let anchor = findAnchorPoint(frame: frame) {
+            payload["distanceCm"] = anchor.distanceCm
+            if let pixel = imagePixel(forViewPoint: anchor.point, frame: frame) {
+                payload["anchorPixelX"] = Double(pixel.x)
+                payload["anchorPixelY"] = Double(pixel.y)
+            }
         }
         // Tier 1 (LiDAR/ToF iPhones): a dense per-pixel depth map is
         // available straight from the sensor — far more accurate than the
@@ -198,12 +212,14 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
 
     // MARK: - Internals
 
-    private func centerDistanceCm(frame: ARFrame) -> Double? {
-        let center = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+    /// Raycasts a single view-space point against the detected horizontal
+    /// plane (extrapolated, like the old fixed-centre version) and returns
+    /// the camera-to-hit distance if it lands on the plane.
+    private func raycastDistanceCm(at point: CGPoint, frame: ARFrame) -> Double? {
         guard sceneView.bounds.width > 0,
-              let query = sceneView.raycastQuery(from: center, allowing: .estimatedPlane, alignment: .horizontal)
+              let query = sceneView.raycastQuery(from: point, allowing: .estimatedPlane, alignment: .horizontal),
+              let result = sceneView.session.raycast(query).first
         else { return nil }
-        guard let result = sceneView.session.raycast(query).first else { return nil }
 
         let camera = frame.camera.transform.columns.3
         let hit = result.worldTransform.columns.3
@@ -212,6 +228,69 @@ final class ArKitPlatformView: NSObject, FlutterPlatformView, ARSessionDelegate 
         let dz = camera.z - hit.z
         let meters = (dx * dx + dy * dy + dz * dz).squareRoot()
         return Double(meters) * 100.0
+    }
+
+    /// Candidate points for the anchor search: screen centre first, then
+    /// rings expanding outward (up to 90% of the half-extent, leaving a ~10%
+    /// margin near the edges where lens distortion is worst).
+    private func candidateAnchorPoints(in bounds: CGRect) -> [CGPoint] {
+        let cx = bounds.midX
+        let cy = bounds.midY
+        let halfW = bounds.width / 2
+        let halfH = bounds.height / 2
+        var points: [CGPoint] = [CGPoint(x: cx, y: cy)]
+        for radiusFraction in Self.anchorRingRadiusFractions {
+            for i in 0..<Self.anchorRingAngleCount {
+                let angle = (CGFloat(i) / CGFloat(Self.anchorRingAngleCount)) * 2 * .pi
+                let dx = cos(angle) * radiusFraction * halfW
+                let dy = sin(angle) * radiusFraction * halfH
+                points.append(CGPoint(x: cx + dx, y: cy + dy))
+            }
+        }
+        return points
+    }
+
+    /// Finds a screen point that currently lands on the detected horizontal
+    /// plane — preferring the previous frame's point (`lastAnchorPoint`) to
+    /// keep the on-screen dot stable, only searching a fresh ring of
+    /// candidates when that point stops being valid (e.g. the user moved the
+    /// phone). Unlike a fixed centre point, this naturally avoids food (never
+    /// tracked as part of the plane) and glossy/textureless plate surfaces
+    /// (rarely tracked either), since both are excluded from the plane's
+    /// observed geometry rather than guessed around.
+    private func findAnchorPoint(frame: ARFrame) -> (point: CGPoint, distanceCm: Double)? {
+        guard sceneView.bounds.width > 0, sceneView.bounds.height > 0 else { return nil }
+
+        if let sticky = lastAnchorPoint, let distance = raycastDistanceCm(at: sticky, frame: frame) {
+            return (sticky, distance)
+        }
+        for candidate in candidateAnchorPoints(in: sceneView.bounds) {
+            if let distance = raycastDistanceCm(at: candidate, frame: frame) {
+                lastAnchorPoint = candidate
+                return (candidate, distance)
+            }
+        }
+        lastAnchorPoint = nil
+        return nil
+    }
+
+    /// Maps a view-space point to the matching pixel in the *captured*
+    /// image (`frame.capturedImage`'s resolution) — the space the depth map
+    /// and camera intrinsics operate in. Needed because the anchor point is
+    /// no longer always the image centre, so the backend can no longer
+    /// assume anchor pixel == (cx, cy). `displayTransform` is ARKit's own
+    /// API for the inverse mapping (image -> view, used to overlay UI on the
+    /// camera feed); inverting it gives view -> image.
+    private func imagePixel(forViewPoint point: CGPoint, frame: ARFrame) -> CGPoint? {
+        let bounds = sceneView.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        let orientation = sceneView.window?.windowScene?.interfaceOrientation ?? .portrait
+        let displayTransform = frame.displayTransform(for: orientation, viewportSize: bounds.size)
+        let inverse = displayTransform.inverted()
+        let normalizedView = CGPoint(x: point.x / bounds.width, y: point.y / bounds.height)
+        let normalizedImage = normalizedView.applying(inverse)
+        let resolution = frame.camera.imageResolution
+        return CGPoint(x: normalizedImage.x * resolution.width, y: normalizedImage.y * resolution.height)
     }
 
     private func saveCapturedImage(_ pixelBuffer: CVPixelBuffer) -> String? {

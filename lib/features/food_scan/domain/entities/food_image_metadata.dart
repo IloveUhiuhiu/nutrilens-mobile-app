@@ -14,6 +14,8 @@ class FoodImageMetadata {
     required this.intrinsicsSource,
     this.hasAbsoluteDepth = false,
     this.cameraToObjectDistanceCm,
+    this.anchorPixelX,
+    this.anchorPixelY,
     this.idempotencyKey = '',
     this.depthMapPath,
   });
@@ -55,6 +57,8 @@ class FoodImageMetadata {
     required double cy,
     required String source,
     double? cameraToObjectDistanceCm,
+    double? anchorPixelX,
+    double? anchorPixelY,
     String idempotencyKey = '',
     String? depthMapPath,
   }) {
@@ -74,6 +78,8 @@ class FoodImageMetadata {
       // estimated. Plain captures leave this null → hasAbsoluteDepth = false.
       hasAbsoluteDepth: cameraToObjectDistanceCm != null,
       cameraToObjectDistanceCm: cameraToObjectDistanceCm,
+      anchorPixelX: anchorPixelX,
+      anchorPixelY: anchorPixelY,
       idempotencyKey: idempotencyKey,
       depthMapPath: depthMapPath,
     );
@@ -98,6 +104,15 @@ class FoodImageMetadata {
   /// Absolute distance from camera to the food plane in centimetres, sampled
   /// via ARCore/ARKit raycasting. Null on non-AR devices (CASE B).
   final double? cameraToObjectDistanceCm;
+
+  /// Pixel coordinates (in this image's own resolution) of the point the AR
+  /// raycast actually measured — no longer always the image centre, since
+  /// the native side now hunts each frame for whichever point currently
+  /// lands on the detected table/plate plane (see ArKitPlatformView.swift /
+  /// ArPlatformView.kt). Null when [cameraToObjectDistanceCm] is null, or on
+  /// older app builds that didn't carry this through.
+  final double? anchorPixelX;
+  final double? anchorPixelY;
 
   /// Stable per-capture token sent as the `Idempotency-Key` header so the
   /// backend dedupes retries of the same capture to a single inference job.
@@ -137,6 +152,10 @@ class FoodImageMetadata {
       // the backend treats a missing value as null (CASE B).
       if (cameraToObjectDistanceCm != null)
         'camera_to_object_distance': cameraToObjectDistanceCm,
+      if (anchorPixelX != null && anchorPixelY != null) ...{
+        'anchor_pixel_x': anchorPixelX,
+        'anchor_pixel_y': anchorPixelY,
+      },
     };
   }
 }

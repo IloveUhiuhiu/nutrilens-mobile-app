@@ -3,6 +3,7 @@ package com.example.nutrilens_mobile_app.ar
 import android.app.Activity
 import android.content.Context
 import android.graphics.ImageFormat
+import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.opengl.GLES20
@@ -12,10 +13,10 @@ import android.os.Looper
 import android.view.View
 import com.google.ar.core.Camera
 import com.google.ar.core.Config
+import com.google.ar.core.Coordinates2d
 import com.google.ar.core.Frame
 import com.google.ar.core.HitResult
 import com.google.ar.core.Plane
-import com.google.ar.core.Point
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
 import io.flutter.plugin.platform.PlatformView
@@ -24,6 +25,8 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
@@ -33,7 +36,13 @@ import kotlin.math.sqrt
  */
 class ArPlatformView(
     private val context: Context,
-    private val onDistance: (distanceCm: Double?, stable: Boolean, depthSource: String) -> Unit,
+    private val onDistance: (
+        distanceCm: Double?,
+        stable: Boolean,
+        depthSource: String,
+        anchorX: Double?,
+        anchorY: Double?,
+    ) -> Unit,
     private val onSessionError: (message: String) -> Unit,
 ) : PlatformView, GLSurfaceView.Renderer {
 
@@ -48,6 +57,11 @@ class ArPlatformView(
     private val background = BackgroundRenderer()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val distanceWindow = ArrayDeque<Double>()
+
+    // "Sticky" anchor point (view pixel coordinates) — re-tested every frame
+    // before falling back to a fresh search, so the on-screen dot doesn't
+    // jitter between candidates while the same spot is still a valid plane hit.
+    private var lastAnchorPoint: PointF? = null
 
     private var session: Session? = null
     private var viewportWidth = 1
@@ -129,15 +143,18 @@ class ArPlatformView(
 
             val camera = frame.camera
             if (camera.trackingState == TrackingState.TRACKING) {
-                val hit = centerHit(frame, camera)
-                if (hit != null) {
+                val anchor = findAnchorHit(frame)
+                if (anchor != null) {
+                    val (point, hit) = anchor
                     val distanceCm = hit.distance * 100.0
-                    pushDistance(distanceCm)
+                    val anchorX = if (viewportWidth > 0) point.x / viewportWidth else null
+                    val anchorY = if (viewportHeight > 0) point.y / viewportHeight else null
+                    pushDistance(distanceCm, anchorX, anchorY)
                 } else {
-                    pushDistance(null)
+                    pushDistance(null, null, null)
                 }
             } else {
-                pushDistance(null)
+                pushDistance(null, null, null)
             }
 
             if (captureRequested) {
@@ -195,28 +212,88 @@ class ArPlatformView(
     // can't claim "LiDAR" specifically the way iOS's sceneDepth check can.
     private fun depthSource(): String = if (depthEnabled) "ar_depth" else "none"
 
-    private fun centerHit(frame: Frame, camera: Camera): HitResult? {
-        val cx = viewportWidth / 2f
-        val cy = viewportHeight / 2f
-        val hits = frame.hitTest(cx, cy)
-        // Prefer a horizontal-plane hit (the table/plate surface).
+    /** Hit-tests a single view-pixel point, accepting only a horizontal-plane
+     * hit within its observed polygon (the table/plate surface) — no fallback
+     * to a feature [com.google.ar.core.Point], since that could land on the
+     * food itself. */
+    private fun planeHit(frame: Frame, point: PointF): HitResult? {
+        val hits = frame.hitTest(point.x, point.y)
         for (hit in hits) {
             val trackable = hit.trackable
             if (trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) {
                 return hit
             }
         }
-        // Fall back to a feature point if no plane is hit yet.
-        for (hit in hits) {
-            if (hit.trackable is Point) return hit
-        }
         return null
     }
 
-    private fun pushDistance(distanceCm: Double?) {
+    /** Candidate points for the anchor search: viewport centre first, then
+     * rings expanding outward (up to 90% of the half-extent, leaving a ~10%
+     * margin near the edges where lens distortion is worst). */
+    private fun candidateAnchorPoints(): List<PointF> {
+        val cx = viewportWidth / 2f
+        val cy = viewportHeight / 2f
+        val halfW = viewportWidth / 2f
+        val halfH = viewportHeight / 2f
+        val points = mutableListOf(PointF(cx, cy))
+        for (radiusFraction in ANCHOR_RING_RADIUS_FRACTIONS) {
+            for (i in 0 until ANCHOR_RING_ANGLE_COUNT) {
+                val angle = (i.toFloat() / ANCHOR_RING_ANGLE_COUNT) * 2f * Math.PI.toFloat()
+                val dx = cos(angle) * radiusFraction * halfW
+                val dy = sin(angle) * radiusFraction * halfH
+                points.add(PointF(cx + dx, cy + dy))
+            }
+        }
+        return points
+    }
+
+    /**
+     * Finds a point that currently lands on the detected horizontal plane —
+     * preferring the previous frame's point ([lastAnchorPoint]) to keep the
+     * on-screen dot stable, only searching a fresh ring of candidates when
+     * that point stops being valid (e.g. the user moved the phone). Unlike a
+     * fixed centre point, this naturally avoids food (never tracked as part
+     * of a plane) and glossy/textureless plate surfaces (rarely tracked
+     * either), since both are excluded from the plane's observed geometry
+     * rather than guessed around.
+     */
+    private fun findAnchorHit(frame: Frame): Pair<PointF, HitResult>? {
+        lastAnchorPoint?.let { sticky ->
+            planeHit(frame, sticky)?.let { return sticky to it }
+        }
+        for (candidate in candidateAnchorPoints()) {
+            planeHit(frame, candidate)?.let {
+                lastAnchorPoint = candidate
+                return candidate to it
+            }
+        }
+        lastAnchorPoint = null
+        return null
+    }
+
+    /** Maps a view-pixel point to the matching pixel in the captured camera
+     * image — the space the depth map and camera intrinsics operate in.
+     * Needed because the anchor point is no longer always the image centre,
+     * so the backend can no longer assume anchor pixel == (cx, cy).
+     * [Frame.transformCoordinates2d] is ARCore's own API for this mapping. */
+    private fun imagePixel(frame: Frame, viewPoint: PointF): FloatArray? {
+        if (viewportWidth <= 0 || viewportHeight <= 0) return null
+        val viewNormalized = floatArrayOf(viewPoint.x / viewportWidth, viewPoint.y / viewportHeight)
+        val imageNormalized = FloatArray(2)
+        frame.transformCoordinates2d(
+            Coordinates2d.VIEW_NORMALIZED,
+            viewNormalized,
+            Coordinates2d.IMAGE_NORMALIZED,
+            imageNormalized,
+        )
+        val dims = frame.camera.imageIntrinsics.imageDimensions
+        return floatArrayOf(imageNormalized[0] * dims[0], imageNormalized[1] * dims[1])
+    }
+
+    private fun pushDistance(distanceCm: Double?, anchorX: Float?, anchorY: Float?) {
         if (distanceCm == null) {
             distanceWindow.clear()
-            mainHandler.post { onDistance(null, false, depthSource()) }
+            mainHandler.post { onDistance(null, false, depthSource(), null, null) }
             return
         }
         distanceWindow.addLast(distanceCm)
@@ -224,7 +301,9 @@ class ArPlatformView(
         val mean = distanceWindow.average()
         val variance = distanceWindow.sumOf { (it - mean) * (it - mean) } / distanceWindow.size
         val stable = distanceWindow.size >= STABILITY_WINDOW && sqrt(variance) < STABILITY_STD_CM
-        mainHandler.post { onDistance(mean, stable, depthSource()) }
+        mainHandler.post {
+            onDistance(mean, stable, depthSource(), anchorX?.toDouble(), anchorY?.toDouble())
+        }
     }
 
     private fun runCapture(frame: Frame, camera: Camera): Map<String, Any>? {
@@ -236,8 +315,9 @@ class ArPlatformView(
                 val focal = intrinsics.focalLength       // [fx, fy] in pixels
                 val principal = intrinsics.principalPoint // [cx, cy] in pixels
                 val dims = intrinsics.imageDimensions     // [width, height]
-                val hit = centerHit(frame, camera)
-                val distanceCm = hit?.let { it.distance * 100.0 }
+                val anchor = findAnchorHit(frame)
+                val distanceCm = anchor?.second?.let { it.distance * 100.0 }
+                val anchorPixel = anchor?.let { imagePixel(frame, it.first) }
                 val depthMapPath = if (depthEnabled) acquireDepthNpyPath(frame) else null
                 buildMap {
                     put("imagePath", jpegPath)
@@ -248,6 +328,10 @@ class ArPlatformView(
                     put("cx", principal[0].toDouble())
                     put("cy", principal[1].toDouble())
                     if (distanceCm != null) put("distanceCm", distanceCm)
+                    if (anchorPixel != null) {
+                        put("anchorPixelX", anchorPixel[0].toDouble())
+                        put("anchorPixelY", anchorPixel[1].toDouble())
+                    }
                     if (depthMapPath != null) {
                         put("depthMapPath", depthMapPath)
                         put("depthUnit", "cm")
@@ -356,5 +440,7 @@ class ArPlatformView(
     companion object {
         private const val STABILITY_WINDOW = 8
         private const val STABILITY_STD_CM = 1.0
+        private val ANCHOR_RING_RADIUS_FRACTIONS = floatArrayOf(0.15f, 0.30f, 0.45f)
+        private const val ANCHOR_RING_ANGLE_COUNT = 8
     }
 }

@@ -54,7 +54,13 @@ class ArController(
         view?.resumeSession()
     }
 
-    fun emitDistance(distanceCm: Double?, stable: Boolean, depthSource: String) {
+    fun emitDistance(
+        distanceCm: Double?,
+        stable: Boolean,
+        depthSource: String,
+        anchorX: Double?,
+        anchorY: Double?,
+    ) {
         val sink = eventSink ?: return
         mainHandler.post {
             sink.success(
@@ -62,6 +68,10 @@ class ArController(
                     if (distanceCm != null) put("distance", distanceCm)
                     put("stable", stable)
                     put("depthSource", depthSource)
+                    if (anchorX != null && anchorY != null) {
+                        put("anchorX", anchorX)
+                        put("anchorY", anchorY)
+                    }
                 },
             )
         }

@@ -17,8 +17,8 @@ class ArViewFactory(
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         val view = ArPlatformView(
             context,
-            onDistance = { distanceCm, stable, depthSource ->
-                controller.emitDistance(distanceCm, stable, depthSource)
+            onDistance = { distanceCm, stable, depthSource, anchorX, anchorY ->
+                controller.emitDistance(distanceCm, stable, depthSource, anchorX, anchorY)
             },
             onSessionError = { message ->
                 controller.emitSessionError(message)

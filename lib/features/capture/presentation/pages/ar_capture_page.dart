@@ -31,8 +31,18 @@ class _ArCapturePageState extends State<ArCapturePage> {
   static const _command = MethodChannel('nutrilens/ar');
   static const _distanceEvents = EventChannel('nutrilens/ar/distance');
 
+  static const _minDistanceCm = 20.0;
+  static const _maxDistanceCm = 40.0;
+
   StreamSubscription<dynamic>? _distanceSub;
   double? _distanceCm;
+  // Normalized (0..1) position of the calibration point within the preview,
+  // as found by the native anchor search (see ArKitPlatformView.swift /
+  // ArPlatformView.kt) — no longer always the screen centre, since the
+  // native side now hunts for whichever point currently lands on the
+  // detected table/plate plane instead of trusting a fixed pixel.
+  double? _anchorX;
+  double? _anchorY;
   bool _stable = false;
   bool _capturing = false;
   // Set when the native AR session itself fails (see ArController.emitSessionError /
@@ -51,6 +61,12 @@ class _ArCapturePageState extends State<ArCapturePage> {
   // ArPlatformView.kt. Purely informational; the actual depth-map upload
   // decision is driven by `depthMapPath` being non-null at capture time.
   String _depthSource = 'none';
+
+  bool get _hasAnchor => _anchorX != null && _anchorY != null;
+  bool get _tooClose => _distanceCm != null && _distanceCm! < _minDistanceCm;
+  bool get _tooFar => _distanceCm != null && _distanceCm! > _maxDistanceCm;
+  bool get _inRange => _distanceCm != null && !_tooClose && !_tooFar;
+  bool get _canCapture => _stable && _inRange && _hasAnchor && !_capturing;
 
   @override
   void initState() {
@@ -86,6 +102,8 @@ class _ArCapturePageState extends State<ArCapturePage> {
     }
     setState(() {
       _distanceCm = (event['distance'] as num?)?.toDouble();
+      _anchorX = (event['anchorX'] as num?)?.toDouble();
+      _anchorY = (event['anchorY'] as num?)?.toDouble();
       _stable = event['stable'] == true;
       _depthSource = event['depthSource'] as String? ?? 'none';
       if (_stable) _showFallbackSuggestion = false;
@@ -93,7 +111,7 @@ class _ArCapturePageState extends State<ArCapturePage> {
   }
 
   Future<void> _capture() async {
-    if (!_stable || _capturing) return;
+    if (!_canCapture) return;
     setState(() => _capturing = true);
     try {
       final result = await _command.invokeMapMethod<String, dynamic>('captureFrame');
@@ -111,6 +129,8 @@ class _ArCapturePageState extends State<ArCapturePage> {
         cy: (result['cy'] as num).toDouble(),
         source: 'arcore_arkit',
         cameraToObjectDistanceCm: (result['distanceCm'] as num?)?.toDouble(),
+        anchorPixelX: (result['anchorPixelX'] as num?)?.toDouble(),
+        anchorPixelY: (result['anchorPixelY'] as num?)?.toDouble(),
         idempotencyKey: generateIdempotencyKey(),
         // Present only on tier-1 ToF/LiDAR (and tier-2 ARCore
         // depth-from-motion) devices — see ArPlatformView.kt /
@@ -150,18 +170,22 @@ class _ArCapturePageState extends State<ArCapturePage> {
           alignment: Alignment.center,
           children: [
             Positioned.fill(child: _preview()),
-            // _Reticle must be a positioned child — Scaffold.body gives this
-            // Stack loose constraints, and a Stack with an unpositioned
-            // fixed-size child sizes itself to fit that child instead of
-            // filling the screen. Without this wrapper the whole screen
-            // (preview, close button, badge, shutter) collapsed into a tiny
-            // box anchored top-left, matching exactly what was reported on
-            // ARCore/ARKit-capable devices.
-            Positioned.fill(child: Center(child: _Reticle(active: _stable))),
+            // The reticle tracks the native anchor search (see
+            // ArKitPlatformView.swift / ArPlatformView.kt) — it's no longer
+            // fixed at screen centre, since that's typically where the food
+            // sits. The native side hunts each frame for whichever point
+            // currently lands on the detected table/plate plane, so the dot
+            // moves to wherever that is.
+            if (_hasAnchor)
+              Positioned(
+                left: MediaQuery.of(context).size.width * _anchorX! - 32,
+                top: MediaQuery.of(context).size.height * _anchorY! - 32,
+                child: _Reticle(active: _stable && _inRange),
+              ),
             if (_distanceCm != null)
               Positioned(
                 top: MediaQuery.of(context).size.height * 0.30,
-                child: _DistancePill(cm: _distanceCm!, stable: _stable),
+                child: _DistancePill(cm: _distanceCm!, stable: _stable, inRange: _inRange),
               ),
             Positioned(
               top: 16,
@@ -186,10 +210,14 @@ class _ArCapturePageState extends State<ArCapturePage> {
                 children: [
                   Text(
                     _distanceCm == null
-                        ? 'Rê máy chậm trên đĩa ăn để dò mặt phẳng'
-                        : _stable
-                            ? 'Giữ yên — chạm để chụp'
-                            : 'Đang ổn định khoảng cách…',
+                        ? 'Di chuyển máy đến khi xuất hiện điểm trên mặt bàn trống'
+                        : _tooFar
+                            ? 'Quá xa — lại gần đĩa ăn hơn'
+                            : _tooClose
+                                ? 'Quá gần — ra xa đĩa ăn một chút'
+                                : _stable
+                                    ? 'Giữ yên — chạm để chụp'
+                                    : 'Đang ổn định khoảng cách…',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white,
@@ -213,7 +241,7 @@ class _ArCapturePageState extends State<ArCapturePage> {
             Positioned(
               bottom: 32,
               child: FilledButton(
-                onPressed: _stable && !_capturing ? _capture : null,
+                onPressed: _canCapture ? _capture : null,
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.accent,
                   foregroundColor: const Color(0xFF2B1B00),
@@ -333,14 +361,15 @@ class _DepthSourceBadge extends StatelessWidget {
 }
 
 class _DistancePill extends StatelessWidget {
-  const _DistancePill({required this.cm, required this.stable});
+  const _DistancePill({required this.cm, required this.stable, required this.inRange});
 
   final double cm;
   final bool stable;
+  final bool inRange;
 
   @override
   Widget build(BuildContext context) {
-    final color = stable ? AppTheme.secondary : AppTheme.accent;
+    final color = !inRange ? AppTheme.danger : (stable ? AppTheme.secondary : AppTheme.accent);
     return IgnorePointer(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

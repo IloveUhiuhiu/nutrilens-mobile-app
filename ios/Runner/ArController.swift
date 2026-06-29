@@ -35,11 +35,15 @@ final class ArController: NSObject, FlutterStreamHandler {
         view?.resumeSession()
     }
 
-    func emitDistance(_ distanceCm: Double?, stable: Bool, depthSource: String) {
+    func emitDistance(_ distanceCm: Double?, stable: Bool, depthSource: String, anchorX: Double?, anchorY: Double?) {
         guard let sink = eventSink else { return }
         var payload: [String: Any] = ["stable": stable, "depthSource": depthSource]
         if let distanceCm = distanceCm {
             payload["distance"] = distanceCm
+        }
+        if let anchorX = anchorX, let anchorY = anchorY {
+            payload["anchorX"] = anchorX
+            payload["anchorY"] = anchorY
         }
         DispatchQueue.main.async { sink(payload) }
     }
