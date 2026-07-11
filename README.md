@@ -15,26 +15,14 @@
   <img alt="Status" src="https://img.shields.io/badge/Status-Graduation%20Project-success" />
 </p>
 
-## Interface Preview
+## Interface Screenshots
 
 <p align="center">
-  <img src="docs/assets/demo_cam.jpg" alt="Food capture screen" width="23%" />
-  <img src="docs/assets/demo_phantich.png" alt="Nutrition analysis result" width="36%" />
-  <img src="docs/assets/demo_barcode.png" alt="Barcode food lookup" width="23%" />
+  <img src="docs/assets/demo_phantich.png" alt="Nutrition analysis result" width="32%" />
+  <img src="docs/assets/demo_barcode.png" alt="Barcode food lookup" width="24%" />
+  <img src="docs/assets/demo_usda.png" alt="USDA food search" width="24%" />
 </p>
 
-<p align="center">
-  <img src="docs/assets/demo_usda.png" alt="USDA food search" width="30%" />
-  <img src="docs/assets/demo_tao.jpg" alt="Manual meal entry" width="30%" />
-</p>
-
-## Demo Videos
-
-<p align="center">
-  <video src="docs/assets/demo_monan.mp4" controls width="30%"></video>
-  <video src="docs/assets/demo_cam.mp4" controls width="30%"></video>
-  <video src="docs/assets/demo_tao.mp4" controls width="30%"></video>
-</p>
 
 ## Overview
 
@@ -86,7 +74,7 @@ lib/
   shared/      Reusable widgets
 assets/
   brand/       Logo and brand assets
-docs/assets/   Screenshots, logo, and demo videos used by this README
+docs/assets/   Screenshots, logo, and demo images used by this README
 ```
 
 ## Local Setup
