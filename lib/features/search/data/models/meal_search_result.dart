@@ -1,3 +1,4 @@
+import '../../../../core/utils/parsing.dart';
 class MealSearchResult {
   const MealSearchResult({
     required this.fdcId,
@@ -46,7 +47,7 @@ class MealSearchResult {
 double _nutrient(Map<String, dynamic> json, List<String> keys) {
   for (final key in keys) {
     final value = json[key];
-    final parsed = _toDouble(value);
+    final parsed = toDoubleOrZero(value);
     if (parsed > 0) return parsed;
   }
 
@@ -57,7 +58,7 @@ double _nutrient(Map<String, dynamic> json, List<String> keys) {
       final map = Map<String, dynamic>.from(item);
       final name = '${map['nutrientName'] ?? map['name'] ?? ''}'.toLowerCase();
       if (keys.any((key) => name.contains(key.toLowerCase()))) {
-        return _toDouble(map['value'] ?? map['amount']);
+        return toDoubleOrZero(map['value'] ?? map['amount']);
       }
     }
   }
@@ -65,7 +66,3 @@ double _nutrient(Map<String, dynamic> json, List<String> keys) {
   return 0;
 }
 
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
-}

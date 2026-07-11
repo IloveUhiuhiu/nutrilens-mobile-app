@@ -26,15 +26,13 @@ class FoodScanRetryRequested extends FoodScanEvent {
   const FoodScanRetryRequested({
     required this.imagePath,
     this.jobId,
-    this.metadata,
   });
 
   final String imagePath;
   final String? jobId;
-  final FoodImageMetadata? metadata;
 
   @override
-  List<Object?> get props => [imagePath, jobId, metadata];
+  List<Object?> get props => [imagePath, jobId];
 }
 
 class FoodScanCancelRequested extends FoodScanEvent {

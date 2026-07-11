@@ -1,5 +1,6 @@
 import '../../../../core/utils/image_url_utils.dart';
 import '../../domain/entities/food_analysis.dart';
+import '../../../../core/utils/parsing.dart';
 
 class FoodAnalysisModel extends FoodAnalysis {
   const FoodAnalysisModel({
@@ -29,22 +30,22 @@ class FoodAnalysisModel extends FoodAnalysis {
                 data['image'],
           ) ??
           '',
-      totalCalories: _toDouble(
+      totalCalories: toDoubleOrZero(
         nutrition['totalCalories'] ??
             nutrition['total_calories'] ??
             nutrition['calories'],
       ),
-      proteinGrams: _toDouble(
+      proteinGrams: toDoubleOrZero(
         nutrition['proteinGrams'] ??
             nutrition['total_protein'] ??
             nutrition['protein'],
       ),
-      carbsGrams: _toDouble(
+      carbsGrams: toDoubleOrZero(
         nutrition['carbsGrams'] ??
             nutrition['total_carbs'] ??
             nutrition['carbs'],
       ),
-      fatGrams: _toDouble(
+      fatGrams: toDoubleOrZero(
         nutrition['fatGrams'] ?? nutrition['total_fat'] ?? nutrition['fat'],
       ),
       items: rawItems
@@ -74,19 +75,19 @@ class FoodAnalysisItemModel extends FoodAnalysisItem {
 
   factory FoodAnalysisItemModel.fromJson(Map<String, dynamic> json) {
     final rawIngredients = (json['ingredients'] ?? const []) as List;
-    final proteinGrams = _toDouble(
+    final proteinGrams = toDoubleOrZero(
       json['proteinGrams'] ?? json['protein'] ?? json['total_protein'],
     );
-    final carbsGrams = _toDouble(
+    final carbsGrams = toDoubleOrZero(
       json['carbsGrams'] ?? json['carbs'] ?? json['total_carbs'],
     );
-    final fatGrams = _toDouble(
+    final fatGrams = toDoubleOrZero(
       json['fatGrams'] ?? json['fat'] ?? json['total_fat'],
     );
-    final weightGrams = _toDouble(
+    final weightGrams = toDoubleOrZero(
       json['weightGrams'] ?? json['weight'] ?? json['calculated_weight'],
     );
-    final calories = _toDouble(json['calories']);
+    final calories = toDoubleOrZero(json['calories']);
     final label = '${json['physical_data_name'] ?? json['component_name'] ?? json['label'] ?? json['name'] ?? ''}';
 
     var ingredients = rawIngredients
@@ -118,7 +119,7 @@ class FoodAnalysisItemModel extends FoodAnalysisItem {
 
     return FoodAnalysisItemModel(
       label: label,
-      confidence: _toDouble(json['confidence']),
+      confidence: toDoubleOrZero(json['confidence']),
       boundingBox: BoundingBoxModel.fromJson(
         Map<String, dynamic>.from(json['boundingBox'] ?? json['bbox'] ?? {}),
       ),
@@ -133,7 +134,7 @@ class FoodAnalysisItemModel extends FoodAnalysisItem {
         Map<String, dynamic>.from(
             json['depth'] ?? json['depthEstimation'] ?? {}),
       ),
-      volumeMl: _toDouble(json['volumeMl'] ?? json['volume']),
+      volumeMl: toDoubleOrZero(json['volumeMl'] ?? json['volume']),
       calories: calories,
       proteinGrams: proteinGrams,
       carbsGrams: carbsGrams,
@@ -158,10 +159,10 @@ class BoundingBoxModel extends BoundingBox {
 
   factory BoundingBoxModel.fromJson(Map<String, dynamic> json) {
     return BoundingBoxModel(
-      x: _toDouble(json['x']),
-      y: _toDouble(json['y']),
-      width: _toDouble(json['width'] ?? json['w']),
-      height: _toDouble(json['height'] ?? json['h']),
+      x: toDoubleOrZero(json['x']),
+      y: toDoubleOrZero(json['y']),
+      width: toDoubleOrZero(json['width'] ?? json['w']),
+      height: toDoubleOrZero(json['height'] ?? json['h']),
     );
   }
 }
@@ -190,7 +191,7 @@ class DepthEstimationModel extends DepthEstimation {
 
   factory DepthEstimationModel.fromJson(Map<String, dynamic> json) {
     return DepthEstimationModel(
-      averageDepthMm: _toDouble(json['averageDepthMm'] ?? json['averageDepth']),
+      averageDepthMm: toDoubleOrZero(json['averageDepthMm'] ?? json['averageDepth']),
       depthMapUrl: ImageUrlUtils.resolveAbsolute(
             json['depth_map_url'] ?? json['depthMapUrl'],
           ) ??
@@ -213,11 +214,11 @@ class IngredientNutritionModel extends IngredientNutrition {
   factory IngredientNutritionModel.fromJson(Map<String, dynamic> json) {
     return IngredientNutritionModel(
       name: '${json['name'] ?? ''}',
-      grams: _toDouble(json['grams']),
-      calories: _toDouble(json['calories']),
-      proteinGrams: _toDouble(json['proteinGrams'] ?? json['protein']),
-      carbsGrams: _toDouble(json['carbsGrams'] ?? json['carbs']),
-      fatGrams: _toDouble(json['fatGrams'] ?? json['fat']),
+      grams: toDoubleOrZero(json['grams']),
+      calories: toDoubleOrZero(json['calories']),
+      proteinGrams: toDoubleOrZero(json['proteinGrams'] ?? json['protein']),
+      carbsGrams: toDoubleOrZero(json['carbsGrams'] ?? json['carbs']),
+      fatGrams: toDoubleOrZero(json['fatGrams'] ?? json['fat']),
       imageUrl: ImageUrlUtils.resolveAbsolute(
         json['image_url'] ??
             json['imageUrl'] ??
@@ -226,11 +227,6 @@ class IngredientNutritionModel extends IngredientNutrition {
       ),
     );
   }
-}
-
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
 }
 
 int _toInt(Object? value) {

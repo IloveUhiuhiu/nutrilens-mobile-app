@@ -2,6 +2,8 @@ import '../../../../core/config/api_endpoints.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../domain/entities/daily_nutrition.dart';
 import '../../domain/entities/nutrition_advice.dart';
+import '../../../../core/utils/parsing.dart';
+import '../../../../core/utils/date_time_utils.dart';
 
 class NutritionRepository {
   NutritionRepository(this._client);
@@ -12,7 +14,7 @@ class NutritionRepository {
   Future<NutritionAdvice?> fetchAdvice({DateTime? date}) async {
     final response = await _client.get<Map<String, dynamic>>(
       ApiEndpoints.nutritionAdvice,
-      queryParameters: date == null ? null : {'date': _dateValue(date)},
+      queryParameters: date == null ? null : {'date': DateTimeUtils.formatDateKey(date)},
     );
     final data = _asMap(response.data?['data']);
     if (data.isEmpty) return null;
@@ -22,7 +24,7 @@ class NutritionRepository {
   Future<DailyNutrition> fetchTodayNutrition({DateTime? date}) async {
     final dailyResponse = await _client.get<Map<String, dynamic>>(
       ApiEndpoints.dailyLog,
-      queryParameters: date == null ? null : {'date': _dateValue(date)},
+      queryParameters: date == null ? null : {'date': DateTimeUtils.formatDateKey(date)},
     );
     final profileResponse = await _client.get<Map<String, dynamic>>(
       ApiEndpoints.authProfile,
@@ -30,15 +32,15 @@ class NutritionRepository {
 
     final daily = _asMap(dailyResponse.data?['data']);
     final profile = _asMap(profileResponse.data?['data']);
-    final calorieGoal = _toDouble(profile['tdee']);
+    final calorieGoal = toDoubleOrZero(profile['tdee']);
 
     return DailyNutrition(
-      calories: _toDouble(daily['total_calories']),
+      calories: toDoubleOrZero(daily['total_calories']),
       calorieGoal: calorieGoal > 0 ? calorieGoal : 2000,
-      proteinGrams: _toDouble(daily['total_protein']),
-      carbsGrams: _toDouble(daily['total_carbs']),
-      fatGrams: _toDouble(daily['total_fat']),
-      weightGrams: _toDouble(daily['total_weight']),
+      proteinGrams: toDoubleOrZero(daily['total_protein']),
+      carbsGrams: toDoubleOrZero(daily['total_carbs']),
+      fatGrams: toDoubleOrZero(daily['total_fat']),
+      weightGrams: toDoubleOrZero(daily['total_weight']),
     );
   }
 
@@ -49,14 +51,5 @@ class NutritionRepository {
     return const <String, dynamic>{};
   }
 
-  String _dateValue(DateTime date) {
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-    return '${date.year}-$month-$day';
-  }
 }
 
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
-}

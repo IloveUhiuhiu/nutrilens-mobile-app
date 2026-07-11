@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import '../../../../core/config/api_endpoints.dart';
 import '../../../../core/network/dio_client.dart';
 import '../models/auth_session_model.dart';
@@ -28,6 +30,10 @@ abstract class AuthRemoteDataSource {
     required String oldPassword,
     required String newPassword,
   });
+
+  Future<({String access, String refresh})?> refreshAccessToken(
+    String refreshToken,
+  );
 }
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
@@ -111,6 +117,35 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         'old_password': oldPassword,
         'new_password': newPassword,
       },
+    );
+  }
+
+  @override
+  Future<({String access, String refresh})?> refreshAccessToken(
+    String refreshToken,
+  ) async {
+    final response = await _client.post<Map<String, dynamic>>(
+      ApiEndpoints.authTokenRefresh,
+      data: {'refresh': refreshToken},
+      // Avoids AuthInterceptor retrying this same call on a 401 (the refresh
+      // token itself being invalid/expired), which would just duplicate the
+      // request instead of fixing anything.
+      options: Options(extra: {'skip_auth_refresh': true}),
+    );
+    // Stock simplejwt TokenRefreshView — returns {"access": ..., "refresh":
+    // ...} directly, unlike every other endpoint which wraps in "data".
+    final body = response.data ?? const <String, dynamic>{};
+    final accessToken = '${body['access'] ?? ''}';
+    if (accessToken.isEmpty) {
+      return null;
+    }
+    // Backend rotates + blacklists the old refresh token on every refresh
+    // (ROTATE_REFRESH_TOKENS/BLACKLIST_AFTER_ROTATION) — the new one must be
+    // returned so the caller persists it, or the next refresh attempt fails.
+    final newRefreshToken = '${body['refresh'] ?? ''}';
+    return (
+      access: accessToken,
+      refresh: newRefreshToken.isNotEmpty ? newRefreshToken : refreshToken,
     );
   }
 }

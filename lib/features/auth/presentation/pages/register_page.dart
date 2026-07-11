@@ -85,7 +85,7 @@ class _RegisterPageState extends State<RegisterPage> {
               message: 'Mã OTP đã được gửi đến email của bạn.',
               type: AppAlertType.success,
             );
-            context.go('/otp', extra: state.session.user.email);
+            context.push('/otp', extra: state.session.user.email);
           }
           if (state is AuthError) {
             AppAlerts.showToast(

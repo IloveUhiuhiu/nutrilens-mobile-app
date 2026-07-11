@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/utils/parsing.dart';
 
 /// Nutrition advice evaluated by the backend (reports/nutrition/advice/).
 ///
@@ -17,7 +18,7 @@ class NutritionAdvice extends Equatable {
         (json['status'] ?? json['alert_level'] ?? 'normal').toString();
     final percent = json['tdee_percent'];
     final ratio = json['ratio'] != null
-        ? _toDouble(json['ratio'])
+        ? toDoubleOrZero(json['ratio'])
         : (percent is num ? percent.toDouble() / 100 : 0.0);
     return NutritionAdvice(
       status: status.isEmpty ? 'normal' : status,
@@ -39,7 +40,3 @@ class NutritionAdvice extends Equatable {
   List<Object?> get props => [status, title, message, ratio];
 }
 
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
-}

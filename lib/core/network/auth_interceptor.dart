@@ -82,10 +82,20 @@ class AuthInterceptor extends Interceptor {
         data: {'refresh': refreshToken},
         options: Options(extra: {'skip_auth_refresh': true}),
       );
-      final data = response.data?['data'];
-      final accessToken = data is Map ? '${data['access'] ?? ''}' : '';
+      // Unlike every other endpoint, this one is the stock simplejwt
+      // TokenRefreshView — it returns {"access": ..., "refresh": ...}
+      // directly, not wrapped in a "data" envelope.
+      final body = response.data ?? const <String, dynamic>{};
+      final accessToken = '${body['access'] ?? ''}';
       if (accessToken.isEmpty) {
         return null;
+      }
+      // Backend has ROTATE_REFRESH_TOKENS + BLACKLIST_AFTER_ROTATION enabled,
+      // so the old refresh token is now blacklisted — the rotated one must be
+      // persisted or the *next* refresh will fail even though this succeeded.
+      final newRefreshToken = '${body['refresh'] ?? ''}';
+      if (newRefreshToken.isNotEmpty) {
+        await _tokenStorage.saveRefreshToken(newRefreshToken);
       }
       await _tokenStorage.saveAccessToken(accessToken);
       return accessToken;

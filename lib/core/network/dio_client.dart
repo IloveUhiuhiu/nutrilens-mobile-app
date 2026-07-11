@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../config/api_config.dart';
 import '../storage/secure_token_storage.dart';
@@ -136,13 +137,39 @@ class DioClient {
         throw mappedError;
       }
 
+      // When the server doesn't return our JSON error envelope (e.g. a
+      // proxy/platform error page, a crashed worker, or a dropped
+      // connection), `_messageFromResponse` has nothing to read — fall back
+      // to a friendly Vietnamese message instead of leaking Dio's internal
+      // diagnostic string (e.g. "This exception was thrown because...") to
+      // the user. The raw detail still goes to the debug log.
+      final fromResponse = _messageFromResponse(error.response?.data);
+      if (fromResponse == null) {
+        debugPrint('[DioClient] ${error.type}: ${error.message}');
+      }
+
       throw ApiException(
-        message: _messageFromResponse(error.response?.data) ??
-            error.message ??
-            'Network request failed.',
+        message: fromResponse ?? _friendlyMessage(error),
         statusCode: error.response?.statusCode,
         data: error.response?.data,
       );
+    }
+  }
+
+  String _friendlyMessage(DioException error) {
+    switch (error.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return 'Kết nối mạng quá chậm. Vui lòng thử lại.';
+      case DioExceptionType.connectionError:
+        return 'Không có kết nối mạng. Vui lòng kiểm tra lại.';
+      case DioExceptionType.badResponse:
+        return 'Máy chủ đang gặp sự cố. Vui lòng thử lại sau.';
+      case DioExceptionType.cancel:
+      case DioExceptionType.badCertificate:
+      case DioExceptionType.unknown:
+        return 'Có lỗi không xác định xảy ra. Vui lòng thử lại.';
     }
   }
 

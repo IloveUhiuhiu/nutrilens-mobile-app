@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
@@ -22,6 +23,7 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
   static const _cancelButtonDelay = Duration(seconds: 5);
 
   bool _showCancelButton = false;
+  bool _cancelling = false;
   Timer? _cancelButtonTimer;
 
   @override
@@ -39,6 +41,9 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
   }
 
   void _onCancel(BuildContext context) {
+    if (_cancelling) return;
+    setState(() => _cancelling = true);
+    HapticFeedback.lightImpact();
     context.read<FoodScanBloc>().add(const FoodScanCancelRequested());
   }
 
@@ -58,9 +63,14 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
         builder: (context, state) {
           if (state is FoodScanPollingFailed) {
             return _FailureView(
+              imagePath: state.imagePath,
+              errorCode: state.errorCode,
               message: state.message,
               onRetry: () {
-                setState(() => _showCancelButton = false);
+                setState(() {
+                  _showCancelButton = false;
+                  _cancelling = false;
+                });
                 _cancelButtonTimer?.cancel();
                 _cancelButtonTimer = Timer(_cancelButtonDelay, () {
                   if (mounted) setState(() => _showCancelButton = true);
@@ -78,6 +88,8 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
 
           if (state is FoodScanError) {
             return _FailureView(
+              imagePath: null,
+              errorCode: null,
               message: state.message,
               onRetry: () => context.go('/scan'),
               onBack: () => context.go('/scan'),
@@ -179,16 +191,17 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 10),
-                        Text(
-                          isProcessing
-                              ? 'Đang phân tích thành phần món ăn...'
-                              : 'Đang tải ảnh lên máy chủ AI...',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            height: 1.45,
+                        if (isProcessing)
+                          const _ProcessingStepLabel()
+                        else
+                          const Text(
+                            'Đang tải ảnh lên máy chủ AI...',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              height: 1.45,
+                            ),
                           ),
-                        ),
                         AnimatedSize(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeOut,
@@ -198,14 +211,33 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
                                   child: AnimatedOpacity(
                                     opacity: _showCancelButton ? 1.0 : 0.0,
                                     duration: const Duration(milliseconds: 300),
-                                    child: OutlinedButton.icon(
-                                      onPressed: () => _onCancel(context),
-                                      icon: const Icon(Icons.close),
-                                      label: const Text('Dừng quá trình phân tích'),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: AppTheme.danger,
-                                        side: const BorderSide(
-                                          color: AppTheme.danger,
+                                    child: SizedBox(
+                                      height: 48,
+                                      child: OutlinedButton.icon(
+                                        onPressed: _cancelling
+                                            ? null
+                                            : () => _onCancel(context),
+                                        icon: _cancelling
+                                            ? const SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                ),
+                                              )
+                                            : const Icon(
+                                                Icons.stop_circle_outlined,
+                                              ),
+                                        label: Text(
+                                          _cancelling
+                                              ? 'Đang dừng...'
+                                              : 'Dừng phân tích',
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: AppTheme.outline,
+                                          side: const BorderSide(
+                                            color: AppTheme.outline,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -221,6 +253,61 @@ class _ScanProcessingPageState extends State<ScanProcessingPage> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Cycles through cosmetic sub-step labels while the AI is processing, so
+/// the user always sees the screen is progressing — the backend reports no
+/// real sub-stages for this single long-running step, so this is presentation
+/// only and never claims a stage the backend hasn't actually reached.
+class _ProcessingStepLabel extends StatefulWidget {
+  const _ProcessingStepLabel();
+
+  static const _labels = [
+    'Đang nhận diện món ăn...',
+    'Đang phân tích dinh dưỡng...',
+    'Đang hoàn thiện kết quả...',
+  ];
+
+  @override
+  State<_ProcessingStepLabel> createState() => _ProcessingStepLabelState();
+}
+
+class _ProcessingStepLabelState extends State<_ProcessingStepLabel> {
+  int _index = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(
+        () => _index = (_index + 1) % _ProcessingStepLabel._labels.length,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: Text(
+        _ProcessingStepLabel._labels[_index],
+        key: ValueKey(_index),
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: AppTheme.textSecondary,
+          height: 1.45,
+        ),
       ),
     );
   }
@@ -290,72 +377,197 @@ class _ScanLaserOverlayState extends State<_ScanLaserOverlay>
   }
 }
 
+/// Icon + tiêu đề riêng cho từng mã lỗi AI (error_code), để người dùng nhận
+/// ra ngay bước nào đã thất bại (vd. nhận diện món ăn) thay vì chỉ thấy một
+/// dấu chấm than chung cho mọi loại lỗi.
+class _FailureInfo {
+  const _FailureInfo({required this.icon, required this.title});
+
+  final IconData icon;
+  final String title;
+}
+
+const _failureInfoByCode = <String, _FailureInfo>{
+  'no_food_detected': _FailureInfo(
+    icon: Icons.no_food_outlined,
+    title: 'Không tìm thấy món ăn',
+  ),
+  'no_plate_detected': _FailureInfo(
+    icon: Icons.dinner_dining_outlined,
+    title: 'Không tìm thấy đĩa/bát',
+  ),
+  'no_ingredients_identified': _FailureInfo(
+    icon: Icons.search_off_outlined,
+    title: 'Không xác định được thành phần',
+  ),
+  'no_segments_produced': _FailureInfo(
+    icon: Icons.broken_image_outlined,
+    title: 'Không phân tách được ảnh',
+  ),
+  'depth_estimation_failed': _FailureInfo(
+    icon: Icons.straighten_outlined,
+    title: 'Không ước tính được khoảng cách',
+  ),
+};
+
+const _defaultFailureInfo = _FailureInfo(
+  icon: Icons.error_outline,
+  title: 'Phân tích thất bại',
+);
+
 class _FailureView extends StatelessWidget {
   const _FailureView({
+    required this.imagePath,
+    required this.errorCode,
     required this.message,
     required this.onRetry,
     required this.onBack,
   });
 
+  final String? imagePath;
+  final String? errorCode;
   final String message;
   final VoidCallback onRetry;
   final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
+    final info = _failureInfoByCode[errorCode] ?? _defaultFailureInfo;
     return SafeArea(
       child: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: AppTheme.danger.withValues(alpha: 0.45),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: AppTheme.danger,
-                    size: 48,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Phân tích thất bại',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      color: AppTheme.danger,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    message,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 20),
-                  FilledButton.icon(
-                    onPressed: onRetry,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Thử lại / Retry'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: onBack,
-                    child: const Text('Quay lại camera'),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.danger.withValues(alpha: 0.14),
+                    blurRadius: 32,
+                    offset: const Offset(0, 16),
                   ),
                 ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _FailureThumbnail(imagePath: imagePath, icon: info.icon),
+                    const SizedBox(height: 24),
+                    Text(
+                      info.title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w900,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: onRetry,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Thử lại'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: onBack,
+                        icon: const Icon(Icons.camera_alt_outlined),
+                        label: const Text('Chụp lại từ đầu'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Ảnh đã chụp (làm tối nhẹ) kèm badge tròn màu đỏ đè lên góc, chứa icon
+/// riêng cho loại lỗi — giúp người dùng liên kết ngay lỗi với chính bức ảnh
+/// vừa chụp thay vì một icon chung trôi nổi giữa màn hình.
+class _FailureThumbnail extends StatelessWidget {
+  const _FailureThumbnail({required this.imagePath, required this.icon});
+
+  final String? imagePath;
+  final IconData icon;
+
+  static const _size = 132.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: _size,
+      height: _size + 12,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: imagePath == null
+                ? DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppTheme.danger.withValues(alpha: 0.08),
+                    ),
+                    child: const SizedBox(width: _size, height: _size),
+                  )
+                : ColorFiltered(
+                    colorFilter: ColorFilter.mode(
+                      Colors.black.withValues(alpha: 0.35),
+                      BlendMode.darken,
+                    ),
+                    child: Image.file(
+                      File(imagePath!),
+                      width: _size,
+                      height: _size,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+          ),
+          Positioned(
+            right: -12,
+            bottom: -12,
+            child: Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppTheme.danger,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.danger.withValues(alpha: 0.35),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: Colors.white, size: 28),
+            ),
+          ),
+        ],
       ),
     );
   }

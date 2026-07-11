@@ -19,7 +19,8 @@ android {
         applicationId = "com.example.nutrilens_mobile_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // ARCore requires API level 24+.
+        minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -42,4 +43,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // ARCore (Google Play Services for AR) — plane detection, hit-test, depth.
+    implementation("com.google.ar:core:1.45.0")
 }

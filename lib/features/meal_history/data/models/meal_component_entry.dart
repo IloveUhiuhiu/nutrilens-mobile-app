@@ -1,4 +1,5 @@
 import '../../../../core/utils/image_url_utils.dart';
+import '../../../../core/utils/parsing.dart';
 
 class MealComponentEntry {
   const MealComponentEntry({
@@ -19,12 +20,12 @@ class MealComponentEntry {
       id: '${json['id'] ?? ''}',
       componentName: '${json['component_name'] ?? ''}',
       physicalDataName: '${json['physical_data_name'] ?? ''}',
-      volume: _toDouble(json['volume']),
-      calculatedWeight: _toDouble(json['calculated_weight'] ?? json['weight']),
-      calories: _toDouble(json['calories']),
-      proteinGrams: _toDouble(json['protein']),
-      carbsGrams: _toDouble(json['carbs']),
-      fatGrams: _toDouble(json['fat']),
+      volume: toDoubleOrZero(json['volume']),
+      calculatedWeight: toDoubleOrZero(json['calculated_weight'] ?? json['weight']),
+      calories: toDoubleOrZero(json['calories']),
+      proteinGrams: toDoubleOrZero(json['protein']),
+      carbsGrams: toDoubleOrZero(json['carbs']),
+      fatGrams: toDoubleOrZero(json['fat']),
       imageUrl: ImageUrlUtils.resolveAbsolute(
         json['image_url'] ?? json['imageUrl'] ?? json['thumbnail_url'],
       ),
@@ -48,7 +49,3 @@ class MealComponentEntry {
   }
 }
 
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
-}

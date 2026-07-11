@@ -1,4 +1,5 @@
 import '../../../../core/utils/image_url_utils.dart';
+import '../../../../core/utils/parsing.dart';
 
 class UserProfile {
   const UserProfile({
@@ -46,13 +47,13 @@ class UserProfile {
       id: '${json['id'] ?? ''}',
       name: '${json['full_name'] ?? ''}',
       email: '${json['email'] ?? ''}',
-      heightCm: _toDouble(json['height']),
-      weightKg: _toDouble(json['current_weight']),
+      heightCm: toDoubleOrZero(json['height']),
+      weightKg: toDoubleOrZero(json['current_weight']),
       activityLevel: '${activityLevelMap['level_name'] ?? ''}',
       activityLevelId: activityLevelId,
-      bmi: _toDouble(json['bmi']),
+      bmi: toDoubleOrZero(json['bmi']),
       bmr: 0,
-      tdee: _toDouble(json['tdee']),
+      tdee: toDoubleOrZero(json['tdee']),
       avatarUrl: ImageUrlUtils.resolveAbsolute(
         json['avatar_url'] ?? json['avatarUrl'],
       ),
@@ -84,7 +85,3 @@ String? _nullableText(Object? value) {
   return text.isEmpty || text == 'null' ? null : text;
 }
 
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value') ?? 0;
-}

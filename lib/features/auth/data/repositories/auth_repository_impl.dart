@@ -72,6 +72,45 @@ class AuthRepositoryImpl implements AuthRepository {
     return _tokenStorage.clearTokens();
   }
 
+  @override
+  Future<bool> tryRestoreSession() async {
+    try {
+      final accessToken = await _tokenStorage.getAccessToken();
+      if (accessToken != null && accessToken.isNotEmpty) {
+        // Don't validate it here — an expired access token is handled
+        // transparently by AuthInterceptor on the first real API call.
+        return true;
+      }
+
+      final refreshToken = await _tokenStorage.getRefreshToken();
+      if (refreshToken == null || refreshToken.isEmpty) {
+        return false;
+      }
+
+      final refreshed = await _remoteDataSource.refreshAccessToken(refreshToken);
+      if (refreshed == null || refreshed.access.isEmpty) {
+        await _tokenStorage.clearTokens();
+        return false;
+      }
+      await _tokenStorage.saveTokens(
+        accessToken: refreshed.access,
+        refreshToken: refreshed.refresh,
+      );
+      return true;
+    } catch (_) {
+      // Covers both a failed refresh call and the token storage itself being
+      // unavailable (e.g. locked keystore) — either way, fall back to login
+      // instead of leaving the splash screen stuck. clearTokens() is
+      // best-effort here since storage itself may be what's failing.
+      try {
+        await _tokenStorage.clearTokens();
+      } catch (_) {
+        // ignore
+      }
+      return false;
+    }
+  }
+
   Future<void> _saveTokensIfPresent(AuthSession session) {
     if (session.accessToken.isEmpty || session.refreshToken.isEmpty) {
       return Future.value();

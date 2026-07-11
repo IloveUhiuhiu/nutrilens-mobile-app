@@ -4,11 +4,15 @@ import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
+import com.example.nutrilens_mobile_app.ar.ArController
+import com.example.nutrilens_mobile_app.ar.ArViewFactory
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var arController: ArController? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -21,6 +25,29 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // AR (ARCore): capability + realtime distance + frame capture, and the
+        // native camera preview platform view.
+        val controller = ArController(this, flutterEngine.dartExecutor.binaryMessenger)
+        arController = controller
+        flutterEngine
+            .platformViewsController
+            .registry
+            .registerViewFactory("nutrilens/ar/preview", ArViewFactory(controller))
+    }
+
+    // No-ops when no AR view is active (most of the app's lifetime), so it's
+    // safe to forward every Activity pause/resume here unconditionally.
+    // Without this, the ARCore session and its GLSurfaceView kept rendering
+    // and holding the camera even after the app was backgrounded mid-scan.
+    override fun onPause() {
+        super.onPause()
+        arController?.pauseActiveSession()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        arController?.resumeActiveSession()
     }
 
     private fun getBackCameraIntrinsics(result: MethodChannel.Result) {

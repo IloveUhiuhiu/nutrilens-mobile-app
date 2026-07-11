@@ -182,12 +182,12 @@ class _ProfilePageState extends State<ProfilePage> {
                       _ActionTile(
                         icon: Icons.person_outline,
                         title: 'Cập nhật hồ sơ',
-                        onTap: () => context.go('/profile/edit'),
+                        onTap: () => context.push('/profile/edit'),
                       ),
                       _ActionTile(
                         icon: Icons.lock_outline,
                         title: 'Đổi mật khẩu',
-                        onTap: () => context.go('/password-change'),
+                        onTap: () => context.push('/password-change'),
                       ),
                       _ActionTile(
                         icon: Icons.menu_book_outlined,

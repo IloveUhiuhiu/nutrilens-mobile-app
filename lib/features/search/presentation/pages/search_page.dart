@@ -5,7 +5,9 @@ import '../../../../core/di/app_dependencies.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_alerts.dart';
 import '../../../../shared/widgets/app_chrome.dart';
+import '../../../../shared/widgets/nutrient_badges.dart';
 import '../../../../shared/widgets/premium_widgets.dart';
+import '../../../../shared/widgets/quantity_input_sheet.dart';
 import '../../../../shared/widgets/search_skeleton_loader.dart';
 import '../../../meal_history/presentation/bloc/meal_history_cubit.dart';
 import '../../../nutrition/presentation/bloc/nutrition_cubit.dart';
@@ -51,7 +53,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _addMeal(MealSearchResult result) async {
-    final grams = await _askGrams();
+    final grams = await _askGrams(result);
     if (grams == null) return;
     setState(() {
       _loading = true;
@@ -84,10 +86,17 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
-  Future<double?> _askGrams() async {
-    final value = await showDialog<double>(
+  Future<double?> _askGrams(MealSearchResult result) async {
+    final value = await showQuantityInputSheet(
       context: context,
-      builder: (_) => const _GramsDialog(),
+      title: 'Khối lượng',
+      subtitle: 'Nhập số gram để lưu vào nhật ký.',
+      initialValue: 100,
+      step: 10,
+      min: 1,
+      formatLabel: (v) => v.toStringAsFixed(0),
+      confirmLabel: 'Thêm',
+      previewBuilder: (grams) => _NutritionPreview(result: result, grams: grams),
     );
     if (value == null || value <= 0) return null;
     return value;
@@ -100,12 +109,12 @@ class _SearchPageState extends State<SearchPage> {
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'Tra cứ Hệ Thống Dinh Dưỡng',
+            'Tra cứu Hệ Thống Dinh Dưỡng',
             style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 4),
           const Text(
-            'Tìm món ăn từ Hệ thông dinh dưỡng USDA FoodData Central và lưu khẩu phần theo gram.',
+            'Tìm món ăn từ Hệ thống dinh dưỡng USDA FoodData Central và lưu khẩu phần theo gram.',
             style: TextStyle(
               color: AppTheme.textSecondary,
               fontWeight: FontWeight.w600,
@@ -203,7 +212,7 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Nhập từ khóa ở ô tìm kiếm phía trên để lấy danh sách thực phẩm từ Hệ thông dinh dưỡng USDA FoodData Central.',
+                    'Nhập từ khóa ở ô tìm kiếm phía trên để lấy danh sách thực phẩm từ Hệ thống dinh dưỡng USDA FoodData Central.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppTheme.textSecondary),
                   ),
@@ -314,58 +323,49 @@ class _MacroDistribution extends StatelessWidget {
   }
 }
 
-class _GramsDialog extends StatefulWidget {
-  const _GramsDialog();
+/// Lives inside the quantity bottom sheet — shows what the chosen gram
+/// amount works out to in calories/protein/carb/fat, scaled from the
+/// per-100g values already on [result], without saving anything.
+class _NutritionPreview extends StatelessWidget {
+  const _NutritionPreview({required this.result, required this.grams});
 
-  @override
-  State<_GramsDialog> createState() => _GramsDialogState();
-}
-
-class _GramsDialogState extends State<_GramsDialog> {
-  final _controller = TextEditingController(text: '100');
-  String? _errorText;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final grams = double.tryParse(_controller.text.trim());
-    if (grams == null || grams <= 0) {
-      setState(() => _errorText = 'Nhập khối lượng lớn hơn 0.');
-      return;
-    }
-    Navigator.of(context).pop(grams);
-  }
+  final MealSearchResult result;
+  final double grams;
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Khối lượng'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _submit(),
-        decoration: InputDecoration(
-          labelText: 'Gram',
-          prefixIcon: const Icon(Icons.scale),
-          errorText: _errorText,
-        ),
+    final scale = grams / 100;
+    return PremiumCard(
+      backgroundColor: AppTheme.surfaceContainer,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          MacroIconRow(
+            icon: nutrientIcon('calories'),
+            label: 'Calories',
+            value: '${(result.calories * scale).toStringAsFixed(0)} kcal',
+            color: AppTheme.primary,
+          ),
+          MacroIconRow(
+            icon: nutrientIcon('protein'),
+            label: 'Protein',
+            value: '${(result.proteinGrams * scale).toStringAsFixed(1)} g',
+            color: AppTheme.protein,
+          ),
+          MacroIconRow(
+            icon: nutrientIcon('carb'),
+            label: 'Carb',
+            value: '${(result.carbsGrams * scale).toStringAsFixed(1)} g',
+            color: AppTheme.carb,
+          ),
+          MacroIconRow(
+            icon: nutrientIcon('fat'),
+            label: 'Fat',
+            value: '${(result.fatGrams * scale).toStringAsFixed(1)} g',
+            color: AppTheme.fat,
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Hủy'),
-        ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Thêm'),
-        ),
-      ],
     );
   }
 }

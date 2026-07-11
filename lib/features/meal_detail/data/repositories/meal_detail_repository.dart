@@ -59,6 +59,38 @@ class MealDetailRepository {
     );
   }
 
+  Future<MealEntry> updateMeal(
+    String mealId, {
+    double? servingAmount,
+    String? notes,
+    // For source types without a per-unit basis to scale from (image,
+    // manual) — overrides the meal's nutrition totals directly. Backend
+    // already accepts these fields for any source_type, unchanged here.
+    double? totalCalories,
+    double? totalProtein,
+    double? totalCarbs,
+    double? totalFat,
+    double? totalWeight,
+  }) async {
+    final response = await _client.patch<Map<String, dynamic>>(
+      ApiEndpoints.mealDetail(mealId),
+      data: {
+        if (servingAmount != null) 'serving_amount': servingAmount,
+        if (notes != null) 'notes': notes,
+        if (totalCalories != null) 'total_calories': totalCalories,
+        if (totalProtein != null) 'total_protein': totalProtein,
+        if (totalCarbs != null) 'total_carbs': totalCarbs,
+        if (totalFat != null) 'total_fat': totalFat,
+        if (totalWeight != null) 'total_weight': totalWeight,
+      },
+    );
+    return MealEntry.fromJson(_unwrap(response.data));
+  }
+
+  Future<void> deleteMeal(String mealId) {
+    return _client.delete<void>(ApiEndpoints.mealDetail(mealId));
+  }
+
   Future<FoodAnalysisModel?> fetchInferenceAnalysis(
     String jobId, {
     MealEntry? entry,

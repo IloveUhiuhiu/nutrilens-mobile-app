@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/di/app_dependencies.dart';
@@ -9,12 +10,18 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/image_url_utils.dart';
 import '../../../../shared/widgets/absolute_network_image.dart';
+import '../../../../shared/widgets/app_alerts.dart';
 import '../../../../shared/widgets/app_chrome.dart';
+import '../../../../shared/widgets/edit_nutrition_sheet.dart';
 import '../../../../shared/widgets/ingredient_image.dart';
+import '../../../../shared/widgets/nutrient_badges.dart';
 import '../../../../shared/widgets/premium_widgets.dart';
+import '../../../../shared/widgets/quantity_input_sheet.dart';
 import '../../../food_scan/domain/entities/food_analysis.dart';
 import '../../../meal_detail/data/repositories/meal_detail_repository.dart';
 import '../../../meal_history/data/models/meal_entry.dart';
+import '../../../meal_history/presentation/bloc/meal_history_cubit.dart';
+import '../../../nutrition/presentation/bloc/nutrition_cubit.dart';
 
 class MealDetailPage extends StatefulWidget {
   const MealDetailPage({super.key, required this.mealId});
@@ -70,6 +77,138 @@ class _MealDetailPageState extends State<MealDetailPage> {
     }
   }
 
+  // Barcode/USDA have a per-unit basis (serving or per-100g) to scale from,
+  // so quantity edits recalculate nutrition server-side. AI/manual entries
+  // don't have that basis — they get a direct nutrition-totals edit instead.
+  bool get _canEditQuantity {
+    final sourceType = _bundle?.entry.sourceType;
+    return sourceType == 'barcode' || sourceType == 'text';
+  }
+
+  bool get _canEditNutrition {
+    final sourceType = _bundle?.entry.sourceType;
+    return sourceType == 'image' || sourceType == 'manual';
+  }
+
+  Future<void> _refreshTotals() async {
+    await Future.wait([
+      context.read<NutritionCubit>().load(),
+      context.read<MealHistoryCubit>().load(),
+    ]);
+  }
+
+  Future<void> _editQuantity() async {
+    final entry = _bundle?.entry;
+    if (entry == null) return;
+    final isGrams = entry.sourceType == 'text';
+    final newValue = await showQuantityInputSheet(
+      context: context,
+      title: isGrams ? 'Sửa khối lượng' : 'Sửa số khẩu phần',
+      initialValue: entry.servingAmount ?? (isGrams ? 100 : 1),
+      step: isGrams ? 10 : 0.25,
+      min: isGrams ? 1 : 0.25,
+      formatLabel: (v) => isGrams ? v.toStringAsFixed(0) : v.toStringAsFixed(2),
+      confirmLabel: 'Lưu',
+    );
+    if (newValue == null || !mounted) return;
+    try {
+      await _repository.updateMeal(widget.mealId, servingAmount: newValue);
+      if (!mounted) return;
+      await Future.wait([_load(), _refreshTotals()]);
+      if (!mounted) return;
+      AppAlerts.showToast(
+        context,
+        message: 'Đã cập nhật số lượng.',
+        type: AppAlertType.success,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      AppAlerts.showToast(
+        context,
+        message: 'Không thể cập nhật số lượng.',
+        type: AppAlertType.critical,
+      );
+    }
+  }
+
+  Future<void> _editNutrition() async {
+    final entry = _bundle?.entry;
+    if (entry == null) return;
+    final result = await showEditNutritionSheet(
+      context: context,
+      initialCalories: entry.calories,
+      initialProtein: entry.proteinGrams,
+      initialCarbs: entry.carbsGrams,
+      initialFat: entry.fatGrams,
+    );
+    if (result == null || !mounted) return;
+    try {
+      await _repository.updateMeal(
+        widget.mealId,
+        totalCalories: result.calories,
+        totalProtein: result.protein,
+        totalCarbs: result.carbs,
+        totalFat: result.fat,
+      );
+      if (!mounted) return;
+      await Future.wait([_load(), _refreshTotals()]);
+      if (!mounted) return;
+      AppAlerts.showToast(
+        context,
+        message: 'Đã cập nhật dinh dưỡng.',
+        type: AppAlertType.success,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      AppAlerts.showToast(
+        context,
+        message: 'Không thể cập nhật dinh dưỡng.',
+        type: AppAlertType.critical,
+      );
+    }
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Xoá bữa ăn'),
+        content: const Text('Bạn có chắc muốn xoá bữa ăn này khỏi nhật ký?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            child: const Text('Xoá'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _repository.deleteMeal(widget.mealId);
+      if (!mounted) return;
+      await _refreshTotals();
+      if (!mounted) return;
+      AppAlerts.showToast(
+        context,
+        message: 'Đã xoá bữa ăn.',
+        type: AppAlertType.success,
+      );
+      context.canPop() ? context.pop() : context.go('/diary');
+    } catch (_) {
+      if (!mounted) return;
+      AppAlerts.showToast(
+        context,
+        message: 'Không thể xoá bữa ăn.',
+        type: AppAlertType.critical,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppShell(
@@ -91,6 +230,26 @@ class _MealDetailPageState extends State<MealDetailPage> {
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
                   ),
                 ),
+                if (!_loading && _bundle != null) ...[
+                  if (_canEditQuantity)
+                    IconButton.filledTonal(
+                      onPressed: _editQuantity,
+                      icon: const Icon(Icons.edit_outlined),
+                      tooltip: 'Sửa số lượng',
+                    )
+                  else if (_canEditNutrition)
+                    IconButton.filledTonal(
+                      onPressed: _editNutrition,
+                      icon: const Icon(Icons.edit_outlined),
+                      tooltip: 'Sửa dinh dưỡng',
+                    ),
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    onPressed: _confirmDelete,
+                    icon: const Icon(Icons.delete_outline, color: AppTheme.danger),
+                    tooltip: 'Xoá',
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 16),
@@ -174,13 +333,21 @@ class _DetailBody extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: 4),
-        Text(
-          '${entry.mealType} • ${DateTimeUtils.formatTime(entry.loggedAt)}',
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
-            fontWeight: FontWeight.w700,
-          ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            SourceBadge(
+              label: entry.mealType,
+              icon: mealTypeIcon(entry.mealType),
+              color: AppTheme.secondary,
+            ),
+            const SizedBox(width: 8),
+            SourceBadge(
+              label: DateTimeUtils.formatTime(entry.loggedAt),
+              icon: Icons.schedule_outlined,
+              color: AppTheme.outline,
+            ),
+          ],
         ),
         const SizedBox(height: 16),
         _MacroSummaryCard(entry: entry),
@@ -243,27 +410,47 @@ class _MacroSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PremiumCard(
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Tổng năng lượng'),
-                Text(
-                  '${entry.calories.toStringAsFixed(0)} kcal',
-                  style: const TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                  ),
+          // Energy gets its own full-width row so the large number is never
+          // squeezed by the macro chips — a shared Row with both previously
+          // let narrow screens shrink this down to where the text wrapped
+          // one character per line.
+          Row(
+            children: [
+              Icon(nutrientIcon('calories'), color: AppTheme.primary, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Tổng năng lượng'),
+                    Text(
+                      '${entry.calories.toStringAsFixed(0)} kcal',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppTheme.primary,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          _MacroChip('P', entry.proteinGrams, AppTheme.protein),
-          _MacroChip('C', entry.carbsGrams, AppTheme.carb),
-          _MacroChip('F', entry.fatGrams, AppTheme.fat),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _MacroChip('P', entry.proteinGrams, AppTheme.protein, nutrientIcon('protein')),
+              _MacroChip('C', entry.carbsGrams, AppTheme.carb, nutrientIcon('carb')),
+              _MacroChip('F', entry.fatGrams, AppTheme.fat, nutrientIcon('fat')),
+            ],
+          ),
         ],
       ),
     );
@@ -366,10 +553,30 @@ class _BarcodeDetailView extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 10),
-              _MacroRow(label: 'Calories', value: '${(calories * servings).toStringAsFixed(0)} kcal'),
-              _MacroRow(label: 'Protein', value: '${(protein * servings).toStringAsFixed(1)} g'),
-              _MacroRow(label: 'Carb', value: '${(carbs * servings).toStringAsFixed(1)} g'),
-              _MacroRow(label: 'Fat', value: '${(fat * servings).toStringAsFixed(1)} g'),
+              _MacroRow(
+                label: 'Calories',
+                value: '${(calories * servings).toStringAsFixed(0)} kcal',
+                icon: nutrientIcon('calories'),
+                color: AppTheme.primary,
+              ),
+              _MacroRow(
+                label: 'Protein',
+                value: '${(protein * servings).toStringAsFixed(1)} g',
+                icon: nutrientIcon('protein'),
+                color: AppTheme.protein,
+              ),
+              _MacroRow(
+                label: 'Carb',
+                value: '${(carbs * servings).toStringAsFixed(1)} g',
+                icon: nutrientIcon('carb'),
+                color: AppTheme.carb,
+              ),
+              _MacroRow(
+                label: 'Fat',
+                value: '${(fat * servings).toStringAsFixed(1)} g',
+                icon: nutrientIcon('fat'),
+                color: AppTheme.fat,
+              ),
             ],
           ),
         ),
@@ -419,13 +626,19 @@ class _UsdaDetailView extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 14),
-              _MacroRow(label: 'Calories', value: '${per100Calories.toStringAsFixed(0)} kcal'),
+              _MacroRow(
+                label: 'Calories',
+                value: '${per100Calories.toStringAsFixed(0)} kcal',
+                icon: nutrientIcon('calories'),
+                color: AppTheme.primary,
+              ),
               const SizedBox(height: 12),
               _AnalyticBar(
                 label: 'Protein',
                 value: per100Protein,
                 max: maxMacro,
                 color: AppTheme.protein,
+                icon: nutrientIcon('protein'),
               ),
               const SizedBox(height: 8),
               _AnalyticBar(
@@ -433,6 +646,7 @@ class _UsdaDetailView extends StatelessWidget {
                 value: per100Carbs,
                 max: maxMacro,
                 color: AppTheme.carb,
+                icon: nutrientIcon('carb'),
               ),
               const SizedBox(height: 8),
               _AnalyticBar(
@@ -440,6 +654,7 @@ class _UsdaDetailView extends StatelessWidget {
                 value: per100Fat,
                 max: maxMacro,
                 color: AppTheme.fat,
+                icon: nutrientIcon('fat'),
               ),
               if (fdcId != null) ...[
                 const SizedBox(height: 14),
@@ -672,7 +887,7 @@ class _AiDetailView extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: () => context.go('/scan-result/feedback'),
+          onPressed: () => context.push('/scan-result/feedback'),
           icon: const Icon(Icons.report_problem_outlined),
           label: const Text('Báo lỗi nhận diện AI'),
           style: OutlinedButton.styleFrom(
@@ -699,8 +914,13 @@ class _GenericDetailView extends StatelessWidget {
           _MacroRow(
             label: 'Khối lượng',
             value: '${entry.weightGrams.toStringAsFixed(0)} g',
+            icon: nutrientIcon('serving'),
           ),
-          _MacroRow(label: 'Loại bữa', value: entry.mealType),
+          _MacroRow(
+            label: 'Loại bữa',
+            value: entry.mealType,
+            icon: mealTypeIcon(entry.mealType),
+          ),
         ],
       ),
     );
@@ -751,12 +971,14 @@ class _AnalyticBar extends StatelessWidget {
     required this.value,
     required this.max,
     required this.color,
+    required this.icon,
   });
 
   final String label;
   final double value;
   final double max;
   final Color color;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -766,6 +988,8 @@ class _AnalyticBar extends StatelessWidget {
       children: [
         Row(
           children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
             Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
             const Spacer(),
             Text('${value.toStringAsFixed(1)} g'),
@@ -787,10 +1011,12 @@ class _AnalyticBar extends StatelessWidget {
 }
 
 class _MacroRow extends StatelessWidget {
-  const _MacroRow({required this.label, required this.value});
+  const _MacroRow({required this.label, required this.value, this.icon, this.color});
 
   final String label;
   final String value;
+  final IconData? icon;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -798,13 +1024,23 @@ class _MacroRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
         children: [
+          if (icon != null) ...[
+            Icon(icon, size: 16, color: color ?? AppTheme.textSecondary),
+            const SizedBox(width: 6),
+          ],
           Expanded(
             child: Text(
               label,
               style: const TextStyle(color: AppTheme.textSecondary),
             ),
           ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: color,
+            ),
+          ),
         ],
       ),
     );
@@ -812,11 +1048,12 @@ class _MacroRow extends StatelessWidget {
 }
 
 class _MacroChip extends StatelessWidget {
-  const _MacroChip(this.label, this.value, this.color);
+  const _MacroChip(this.label, this.value, this.color, this.icon);
 
   final String label;
   final double value;
   final Color color;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -829,9 +1066,16 @@ class _MacroChip extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(
-            '$label ${value.toStringAsFixed(0)}g',
-            style: TextStyle(color: color, fontWeight: FontWeight.w900),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 4),
+              Text(
+                '$label ${value.toStringAsFixed(0)}g',
+                style: TextStyle(color: color, fontWeight: FontWeight.w900),
+              ),
+            ],
           ),
         ),
       ),

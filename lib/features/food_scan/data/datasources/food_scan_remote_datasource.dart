@@ -56,12 +56,32 @@ class FoodScanRemoteDataSourceImpl implements FoodScanRemoteDataSource {
       ),
       ...metadataFields,
       'camera_metadata': jsonEncode(metadata.toJson()),
+      // Dense per-pixel depth map — only present on tier-1 ToF/LiDAR or
+      // tier-2 ARCore depth-from-motion captures (see FoodImageMetadata.
+      // depthMapPath). Absent everywhere else; backend falls back to
+      // AI-estimated depth in that case.
+      if (metadata.depthMapPath != null) ...{
+        'depth_map': await MultipartFile.fromFile(
+          metadata.depthMapPath!,
+          filename: 'depth.npy',
+        ),
+        'depth_metadata': jsonEncode({
+          'file_extension': '.npy',
+          'depth_unit': 'cm',
+        }),
+      },
     });
 
     final createResponse = await _client.post<Map<String, dynamic>>(
       ApiEndpoints.inferenceCreate,
       data: formData,
-      options: Options(contentType: 'multipart/form-data'),
+      options: Options(
+        contentType: 'multipart/form-data',
+        // Backend dedupes repeated creates with the same key to one job.
+        headers: metadata.idempotencyKey.isEmpty
+            ? null
+            : {'Idempotency-Key': metadata.idempotencyKey},
+      ),
       cancelToken: cancelToken,
     );
 

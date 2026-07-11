@@ -111,6 +111,15 @@ class _OtpPageState extends State<OtpPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: IconButton(
+                      onPressed: () => context.canPop()
+                          ? context.pop()
+                          : context.go('/register'),
+                      icon: const Icon(Icons.arrow_back),
+                    ),
+                  ),
                   const CircleAvatar(
                     radius: 42,
                     backgroundColor: Color(0xFFE4F7EC),
